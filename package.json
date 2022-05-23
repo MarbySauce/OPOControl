@@ -4,8 +4,13 @@
   "description": "OPO/A Control with Wavemeter",
   "main": "JS/main.js",
   "scripts": {
+    "start": "electron .",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "author": "Marty DeWitt",
-  "license": "ISC"
+  "license": "ISC",
+  "devDependencies": {
+    "electron": "^18.3.0",
+    "node-addon-api": "^5.0.0"
+  }
 }
