@@ -7,7 +7,7 @@ function create_window() {
 	win = new BrowserWindow({
 		width: 400,
 		height: 400,
-		show: false,
+		//show: false,
 		webPreferences: {
 			nodeIntegration: true,
 			contextIsolation: false,
