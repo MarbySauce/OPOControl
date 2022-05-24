@@ -2,6 +2,7 @@
 
 // OPO/A is controlled through TCP communication, which is done through JS module Net
 const net = require("net");
+const fs = require("fs");
 // Wavemeter is controlled through C++, which requires node addons
 const wavemeter = require("bindings")("wavemeter");
 
@@ -30,11 +31,18 @@ function wavelength_measure(wavelength_amount) {
 // Loop function for previous function
 function wavelength_loop(wavelengths, wavelength_count, wavelength_amount) {
     if (wavelength_count >= wavelength_amount) {
+        write_array(wavelengths);
         let average_results = get_average(wavelengths);
         let average = average_results[0];
         let stdev = average_results[1];
         let stdev_cm = get_del_nu(average, stdev);
-        console.log("Wavelength measurement:", average, stdev, wavelengths);
+        console.log("Wavelength measurement:", average, stdev, wavelengths.length);
+        console.log("Error in cm-1", stdev_cm);
+        average_results = get_reduced_average(wavelengths);
+        average = average_results[0];
+        stdev = average_results[1];
+        stdev_cm = get_del_nu(average, stdev);
+        console.log("Wavelength measurement after reduction:", average, stdev, average_results[2].length);
         console.log("Error in cm-1", stdev_cm);
         if (Math.abs(stdev_cm) < 0.1) {
             update_ir_wavelength(average);
@@ -46,11 +54,15 @@ function wavelength_loop(wavelengths, wavelength_count, wavelength_amount) {
             let wl = wavemeter.getWavelength();
             // Check that the wavelength is not an error code
             if (wl > 0) {
+                /*if (opo_status.current_wl - 0.025 < wl && wl < opo_status.current_wl + 0.025) {
+                    wavelengths.push(wl);
+                    wavelength_count++;
+                }*/
                 wavelengths.push(wl);
                 wavelength_count++;
             }
             wavelength_loop(wavelengths, wavelength_count, wavelength_amount);
-        }, 100 /* ms */);
+        }, 400 /* ms */);
     }
 }
 
@@ -63,6 +75,22 @@ function get_average(array) {
     let avg = sum / len;
     let stdev = Math.sqrt(array.map(x => Math.pow(x - avg, 2)).reduce((a, b) => a + b) / len);
     return [avg, stdev];
+}
+
+// Get average and filter out outliers until a value is converged upon
+function get_reduced_average(array) {
+    let avg_results;
+    let avg;
+    let stdev = 100;
+    while (true) {
+        avg_results = get_average(array);
+        avg = avg_results[0];
+        stdev = avg_results[1];
+        if (array.length < 5 || stdev < 0.001) {
+            return [avg, stdev, array];
+        }
+        array = array.filter(value => (avg - stdev < value && value < avg + stdev));
+    }
 }
 
 // Get error in wavenumbers for nIR
@@ -348,4 +376,13 @@ function laser_excitation_control_goto(wavenumber, use_nm) {
 	let decimal_val = Math.pow(10, d_val);
 	// Adding Number.EPSILON prevents floating point errors
 	return Math.round((num + Number.EPSILON) * decimal_val) / decimal_val;
+}
+
+function write_array(array) {
+    let str = "";
+    for (let i = 0; i < array.length - 1; i++) {
+        str += array[i].toFixed(5) + "\n";
+    }
+    str += array[array.length - 1].toFixed(5);
+    fs.writeFile("./wavelength_measurements.txt", str, () => {});
 }
