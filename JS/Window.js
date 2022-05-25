@@ -16,6 +16,30 @@ function startup() {
 
 /* Functions for wavemeter */
 
+const wavelengths = {
+    values: {
+        wavelengths: []
+    },
+    params: {
+        average_length: 50,
+        reducing_threshold: 0.01,
+        save_loc: "./wavelength_measurements/wavelength_measurements.txt",
+    },
+    counts: {
+        wavelength: 0,
+        failure: 0,
+        iterations: 0,
+        reset: () => wavelengths_counts_reset(),
+    },
+    timeout: {
+        timeout: undefined,
+        cancel: () => wavelengths_timeout_cancel(),
+    },
+    measure: (length) => wavelengths_measure(length),
+    loop: () => wavelengths_loop(),
+}
+
+
 // Get 10 measurements of laser wavelength and print
 function wavelength_measure(wavelength_amount) {
     if (opo_status.motors_moving) {
@@ -25,44 +49,49 @@ function wavelength_measure(wavelength_amount) {
     let wl_amount = wavelength_amount || 3;
     let wavelengths = [];
     let wavelength_count = 0;
-    wavelength_loop(wavelengths, wavelength_count, wl_amount);
+    let failure_count = 0;
+    wavelength_loop(wavelengths, wavelength_count, wl_amount, failure_count);
 }
 
 // Loop function for previous function
-function wavelength_loop(wavelengths, wavelength_count, wavelength_amount) {
+function wavelength_loop(wavelengths, wavelength_count, wavelength_amount, failure_count) {
+    if (failure_count > 0.1 * wavelength_amount) {
+        console.log(`Wavelength loop: ${failure_count} failed measurements - Canceled`);
+        return;
+    }
     if (wavelength_count >= wavelength_amount) {
-        write_array(wavelengths);
-        let average_results = get_average(wavelengths);
-        let average = average_results[0];
-        let stdev = average_results[1];
-        let stdev_cm = get_del_nu(average, stdev);
-        console.log("Wavelength measurement:", average, stdev, wavelengths.length);
-        console.log("Error in cm-1", stdev_cm);
-        average_results = get_reduced_average(wavelengths);
-        average = average_results[0];
-        stdev = average_results[1];
-        stdev_cm = get_del_nu(average, stdev);
-        console.log("Wavelength measurement after reduction:", average, stdev, average_results[2].length);
-        console.log("Error in cm-1", stdev_cm);
-        if (Math.abs(stdev_cm) < 0.1) {
-            update_ir_wavelength(average);
-        } else {
-            console.log("Standard deviation too high");
-        }
+        wavelength_loop_closure(wavelengths, wavelength_count, wavelength_amount);
     } else {
         setTimeout(() => {
             let wl = wavemeter.getWavelength();
             // Check that the wavelength is not an error code
             if (wl > 0) {
-                /*if (opo_status.current_wl - 0.025 < wl && wl < opo_status.current_wl + 0.025) {
-                    wavelengths.push(wl);
-                    wavelength_count++;
-                }*/
                 wavelengths.push(wl);
                 wavelength_count++;
+            } else {
+                failure_count++;
             }
-            wavelength_loop(wavelengths, wavelength_count, wavelength_amount);
-        }, 400 /* ms */);
+            wavelength_loop(wavelengths, wavelength_count, wavelength_amount, failure_count);
+        }, 100 /* ms */);
+    }
+}
+
+// Function executed on completion of wavelength_loop
+function wavelength_loop_closure(wavelengths, wavelength_count, wavelength_amount) {
+    let reduced_array;
+    write_array(wavelengths);
+    let [average, stdev] = get_average(wavelengths);
+    let stdev_cm = get_del_nu(average, stdev);
+    console.log("Wavelength measurement:", average, stdev, wavelengths.length);
+    console.log("Error in cm-1", stdev_cm);
+    [average, stdev, reduced_array] = get_reduced_average(wavelengths);
+    stdev_cm = get_del_nu(average, stdev);
+    console.log("Wavelength measurement after reduction:", average, stdev, reduced_array.length);
+    console.log("Error in cm-1", stdev_cm);
+    if (Math.abs(stdev_cm) < 0.1) {
+        update_ir_wavelength(average);
+    } else {
+        console.log("Standard deviation too high");
     }
 }
 
@@ -79,18 +108,28 @@ function get_average(array) {
 
 // Get average and filter out outliers until a value is converged upon
 function get_reduced_average(array) {
-    let avg_results;
     let avg;
     let stdev = 100;
+    let iteration_count = 0;
     while (true) {
-        avg_results = get_average(array);
-        avg = avg_results[0];
-        stdev = avg_results[1];
-        if (array.length < 5 || stdev < 0.001) {
+        [avg, stdev] = get_average(array);
+        if (array.length < 5 || stdev < 0.01) {
+            console.log(`Reduced Average iterations: ${iteration_count}`);
             return [avg, stdev, array];
         }
         array = array.filter(value => (avg - stdev < value && value < avg + stdev));
+        iteration_count++;
     }
+}
+
+// Write wavelength array to file
+function write_array(array) {
+    let str = "";
+    for (let i = 0; i < array.length - 1; i++) {
+        str += array[i].toFixed(5) + "\n";
+    }
+    str += array[array.length - 1].toFixed(5);
+    fs.writeFile("./wavelength_measurements/wavelength_measurements.txt", str, () => {});
 }
 
 // Get error in wavenumbers for nIR
@@ -376,13 +415,4 @@ function laser_excitation_control_goto(wavenumber, use_nm) {
 	let decimal_val = Math.pow(10, d_val);
 	// Adding Number.EPSILON prevents floating point errors
 	return Math.round((num + Number.EPSILON) * decimal_val) / decimal_val;
-}
-
-function write_array(array) {
-    let str = "";
-    for (let i = 0; i < array.length - 1; i++) {
-        str += array[i].toFixed(5) + "\n";
-    }
-    str += array[array.length - 1].toFixed(5);
-    fs.writeFile("./wavelength_measurements.txt", str, () => {});
 }
