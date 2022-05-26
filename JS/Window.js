@@ -3,6 +3,7 @@
 // OPO/A is controlled through TCP communication, which is done through JS module Net
 const net = require("net");
 const fs = require("fs");
+const { performance } = require("perf_hooks");
 // Wavemeter is controlled through C++, which requires node addons
 const wavemeter = require("bindings")("wavemeter");
 
@@ -11,126 +12,256 @@ window.onload = function () {
 }
 
 function startup() {
+    laser.excitation.mode = 'mir';
     init_opo();
 }
 
 /* Functions for wavemeter */
 
 const wavelengths = {
-    values: {
-        wavelengths: []
+    values: [],
+    results: {
+        average: 0,
+        stdev: 0,
+        reduced_average: 0,
+        reduced_stdev: 0,
+        reduced_values: [],
+    },
+    status: {
+        measuring: true, // Whether a measurement is being taken
     },
     params: {
-        average_length: 50,
-        reducing_threshold: 0.01,
+        average_length: 10,
+        default_average_length: 10,
+        reducing_threshold: 0.01, // nm
+        measurement_delay: 100, // ms
+        max_iterations: 10,
+        should_reduce: true,
+        should_save: false,
+        show_results: true,
         save_loc: "./wavelength_measurements/wavelength_measurements.txt",
     },
     counts: {
-        wavelength: 0,
-        failure: 0,
+        values: 0,
+        failures: 0,
         iterations: 0,
-        reset: () => wavelengths_counts_reset(),
     },
-    timeout: {
-        timeout: undefined,
-        cancel: () => wavelengths_timeout_cancel(),
+    timing: {
+        start_time: 0,
+        end_time: 0,
+        elapsed_time: 0,
+        start: () => wavelengths_timing_start(),
+        end: () => wavelengths_timing_end(),
     },
-    measure: (length) => wavelengths_measure(length),
+    timeout: undefined,
+    measure: (length, should_save) => wavelengths_measure(length, should_save),
+    cancel: () => wavelengths_cancel(),
+    save: () => wavelengths_save(),
     loop: () => wavelengths_loop(),
+    process: () => wavelengths_process(),
+    update_ir_wavelength: () => wavelengths_update_ir_wavelength(),
+    average: (return_values, wavelength_values) => wavelengths_average(return_values, wavelength_values),
+    reduced_average: () => wavelengths_reduced_average(),
+    reset: () => wavelengths_reset(),
 }
 
+/* Wavelengths function definitions */
 
-// Get 10 measurements of laser wavelength and print
-function wavelength_measure(wavelength_amount) {
+// Get series of wavelength measurements to average
+function wavelengths_measure(length, should_save) {
     if (opo_status.motors_moving) {
         // Motors are still moving, don't measure
+        console.log("Motors are still moving...");
         return;
     }
-    let wl_amount = wavelength_amount || 3;
-    let wavelengths = [];
-    let wavelength_count = 0;
-    let failure_count = 0;
-    wavelength_loop(wavelengths, wavelength_count, wl_amount, failure_count);
+    if (length > 0) {
+        wavelengths.params.average_length = length;
+    } else {
+        // Use default value
+        wavelengths.params.average_length = wavelengths.params.default_average_length;
+    }
+    if (should_save || should_save === false) {
+        wavelengths.params.should_save = should_save;
+    }
+    console.log("------------------------------------------------------")
+    console.log("Starting wavelength measurement!")
+    // Reset counters and value array
+    wavelengths.reset();
+    // Start loop
+    wavelengths.status.measuring = true;
+    wavelengths.timing.start();
+    wavelengths.loop();
 }
 
-// Loop function for previous function
-function wavelength_loop(wavelengths, wavelength_count, wavelength_amount, failure_count) {
-    if (failure_count > 0.1 * wavelength_amount) {
-        console.log(`Wavelength loop: ${failure_count} failed measurements - Canceled`);
+// Cancel a measurement if currently being taken
+function wavelengths_cancel() {
+    if (!wavelengths.status.measuring || !wavelengths.timeout) {
+        // No current measurement, return
         return;
     }
-    if (wavelength_count >= wavelength_amount) {
-        wavelength_loop_closure(wavelengths, wavelength_count, wavelength_amount);
+    // Cancel the timeout
+    clearTimeout(wavelengths.timeout);
+    wavelengths.timing.end();
+    wavelengths.status.measuring = false;
+    console.log("Measurement canceled");
+}
+
+// Save wavelength measurements to file
+function wavelengths_save() {
+    fs.writeFile(wavelengths.params.save_loc, wavelengths.values.join("\n"), () => {});
+    // Don't automatically save future measurements
+    wavelengths.params.should_save = false;
+}
+
+// Repeatedly measure wavelength
+function wavelengths_loop() {
+    if (wavelengths.counts.failures > 0.2 * wavelengths.params.average_length) {
+        // Too many failed measurements, cancel measurement
+        console.log(`Wavelength loop: ${wavelengths.counts.failures} failed measurements - Canceled`);
+        wavelengths.timing.end();
+        wavelengths.status.measuring = false;
+        return;
+    }
+    if (wavelengths.counts.values >= wavelengths.params.average_length) {
+        // Enough wavelengths have been measured, execute post-measurement processing
+        wavelengths.timing.end();
+        wavelengths.status.measuring = false;
+        wavelengths.process();
     } else {
-        setTimeout(() => {
+        // Set timout to measure another wavelength after given delay
+        wavelengths.timeout = setTimeout(() => {
             let wl = wavemeter.getWavelength();
-            // Check that the wavelength is not an error code
             if (wl > 0) {
-                wavelengths.push(wl);
-                wavelength_count++;
+                // Make sure we didn't get the same measurement twice by comparing against last measurement
+                if (wl !== wavelengths.values.at(-1)) {
+                    wavelengths.values.push(wl);
+                    wavelengths.counts.values++;
+                }
             } else {
-                failure_count++;
+                // Wavelength was not measured, uptick failure count
+                wavelengths.counts.failures++;
             }
-            wavelength_loop(wavelengths, wavelength_count, wavelength_amount, failure_count);
-        }, 100 /* ms */);
+            // Re-execute the loop
+            wavelengths.loop();
+        }, wavelengths.params.measurement_delay);
     }
 }
 
-// Function executed on completion of wavelength_loop
-function wavelength_loop_closure(wavelengths, wavelength_count, wavelength_amount) {
-    let reduced_array;
-    write_array(wavelengths);
-    let [average, stdev] = get_average(wavelengths);
-    let stdev_cm = get_del_nu(average, stdev);
-    console.log("Wavelength measurement:", average, stdev, wavelengths.length);
-    console.log("Error in cm-1", stdev_cm);
-    [average, stdev, reduced_array] = get_reduced_average(wavelengths);
-    stdev_cm = get_del_nu(average, stdev);
-    console.log("Wavelength measurement after reduction:", average, stdev, reduced_array.length);
-    console.log("Error in cm-1", stdev_cm);
-    if (Math.abs(stdev_cm) < 0.1) {
-        update_ir_wavelength(average);
+// Process wavelength values after measurement is completed
+function wavelengths_process() {
+    // Save values if requested
+    if (wavelengths.params.should_save) {
+        wavelengths.save();
+    }
+    // Calculate average values and standard deviation
+    wavelengths.average();
+    // Calculate reduced average, stdev values if requested
+    if (wavelengths.params.should_reduce) {
+        wavelengths.reduced_average();
+    }
+    // Update laser energies with new measurement
+    wavelengths.update_ir_wavelength();
+    // Print results if requested
+    if (wavelengths.params.show_results) {
+        console.log(`Measured wavelength ${wavelengths.results.average.toFixed(4)} nm with ${wavelengths.results.stdev.toFixed(6)} nm variation`);
+        if (wavelengths.params.should_reduce && wavelengths.counts.iterations > 0) {
+            console.log(`After reducing to ${wavelengths.results.reduced_values.length} values, wavelength is ${wavelengths.results.reduced_average.toFixed(4)} nm with ${wavelengths.results.reduced_stdev.toFixed(6)} nm variation`);
+            console.log(`OPO Controller wavelength: ${opo_status.current_wl} nm; Difference (actual - controller) = ${(wavelengths.results.reduced_average - opo_status.current_wl).toFixed(4)} nm`);
+        } else {
+            console.log(`OPO Controller wavelength: ${opo_status.current_wl} nm; Difference (actual - controller) = ${(wavelengths.results.average - opo_status.current_wl).toFixed(4)} nm`);
+        }
+        console.log(`${laser.excitation.mode} energy is ${laser.excitation.wavenumber[laser.excitation.mode]} cm^-1`);
+    }
+}
+
+// Update the IR wavelength in laser information
+function wavelengths_update_ir_wavelength() {
+    let wavelength;
+    // Check if we should use reduced average value
+    if (wavelengths.params.should_reduce) {
+        wavelength = wavelengths.results.reduced_average;
     } else {
-        console.log("Standard deviation too high");
+        wavelength = wavelengths.results.average;
     }
+    // Make sure it's within bounds of nIR
+    if (wavelength < laser.excitation.control.nir_lower_bound || wavelength > laser.excitation.control.nir_upper_bound) {
+        return;
+    }
+    laser.excitation.wavelength.input = wavelength;
+    laser.excitation.convert();
 }
 
-// Get average and variation of an array
-function get_average(array) {
-    const len = array.length;
-    const sum = array.reduce((accumulator, current_value) => {
+
+// Calculate average value and standard deviation of wavelength measurements
+function wavelengths_average(return_values, wavelength_values) {
+    if (!wavelength_values) {
+        wavelength_values = wavelengths.values;
+    }
+    const len = wavelength_values.length;
+    const sum = wavelength_values.reduce((accumulator, current_value) => {
         return accumulator + current_value;
     });
-    let avg = sum / len;
-    let stdev = Math.sqrt(array.map(x => Math.pow(x - avg, 2)).reduce((a, b) => a + b) / len);
-    return [avg, stdev];
+    let average = sum / len;
+    let stdev = Math.sqrt(wavelength_values.map(x => Math.pow(x - average, 2)).reduce((a, b) => a + b) / len);
+    if (return_values) {
+        return [average, stdev];
+    }
+    // return_values is false (or null), save values
+    wavelengths.results.average = average;
+    wavelengths.results.stdev = stdev;
 }
 
-// Get average and filter out outliers until a value is converged upon
-function get_reduced_average(array) {
-    let avg;
-    let stdev = 100;
-    let iteration_count = 0;
+// Calculate average and filter outliers until standard deviation is small enough
+function wavelengths_reduced_average() {
+    let average; let stdev;
+    // Copy values into new array to reduce
+    let values = [...wavelengths.values];
     while (true) {
-        [avg, stdev] = get_average(array);
-        if (array.length < 5 || stdev < 0.01) {
-            console.log(`Reduced Average iterations: ${iteration_count}`);
-            return [avg, stdev, array];
+        [average, stdev] = wavelengths.average(true, values); // Get average and return values (not save)
+        if (values.length < 5 || stdev < wavelengths.params.reducing_threshold || wavelengths.counts.iterations >= wavelengths.params.max_iterations) {
+            wavelengths.results.reduced_average = average;
+            wavelengths.results.reduced_stdev = stdev;
+            wavelengths.results.reduced_values = values;
+            console.log(`Reduced Average iterations: ${wavelengths.counts.iterations}`);
+            return;
         }
-        array = array.filter(value => (avg - stdev < value && value < avg + stdev));
-        iteration_count++;
+        // Filter out wavelengths more than 1 stdev away from average
+        values = values.filter(wl => (average - stdev < wl && wl < average + stdev));
+        // Uptick reduction iteration counter
+        wavelengths.counts.iterations++;
     }
 }
 
-// Write wavelength array to file
-function write_array(array) {
-    let str = "";
-    for (let i = 0; i < array.length - 1; i++) {
-        str += array[i].toFixed(5) + "\n";
-    }
-    str += array[array.length - 1].toFixed(5);
-    fs.writeFile("./wavelength_measurements/wavelength_measurements.txt", str, () => {});
+// Reset previous measurement
+function wavelengths_reset() {
+    // Clear stored wavelengths
+    wavelengths.values = [];
+    wavelengths.results.reduced_values = [];
+    // Clear results
+    wavelengths.results.average = 0;
+    wavelengths.results.stdev = 0;
+    wavelengths.results.reduced_average = 0;
+    wavelengths.results.reduced_stdev = 0;
+    // Reset counters
+    wavelengths.counts.values = 0;
+    wavelengths.counts.failures = 0;
+    wavelengths.counts.iterations = 0;
 }
+
+// Start a timer to measure wavelength measurement time
+function wavelengths_timing_start() {
+    wavelengths.timing.start_time = performance.now();
+}
+
+// End measurement timer and print results
+function wavelengths_timing_end() {
+    wavelengths.timing.end_time = performance.now();
+    wavelengths.timing.elapsed_time = wavelengths.timing.end_time - wavelengths.timing.start_time;
+    console.log(`Time to complete wavelength measurement: ${(wavelengths.timing.elapsed_time / 1000).toFixed(3)} s`);
+}
+
+/* End of wavelengths function definitions */
+
 
 // Get error in wavenumbers for nIR
 // del_iIR, del_mIR = del_nIR
@@ -142,6 +273,77 @@ function get_del_nu(wavelength, stdev) {
 
 
 /* Functions for OPO */
+
+// Is this object gonna confuse with the laser module?
+const opo = {
+    network: {
+        client: new net.Socket(),
+        config: {
+            host: "169.254.170.155",
+            port: 1315,
+        },
+        command: {
+            get_wl: "TELLWL",
+            get_motor_status: "TELLSTAT",
+            move_fast: "SETSP 3.0", // Move 3 nm/sec
+            move_slow: "SETSP 0.66", // Move 0.66 nm/sec
+            move: (val) => { return "GOTO " + val.toFixed(3) },
+        },
+        connect: () => { opo_client.connect(this.config, () => {}) },
+        close: () => { opo_client.end() },
+    },
+    status: {
+        motors_moving: false,
+        current_wavelength: 0,
+    },
+    params: {
+        lower_wl_bound: 710,
+        upper_wl_bound: 880,
+    },
+    get_wavelength: () => { opo.network.client.write(opo_cmd.get_wl, () => {}) },
+    update_wavelength: (wavelength) => opo_update_wavelength(),
+    are_motors_moving: () => opo_are_motors_moving(),
+    get_motor_status: () => { opo_client.write(opo_cmd.get_motor_status, () => {}) },
+    goto_nir: (nir_wavelength) => opo_goto_nir(nir_wavelength),
+    parse_error: (error_code) => opo_parse_error(),
+}
+
+// Receive message from OPO computer
+opo.network.client.on("data", (data) => {
+    // Convert to string
+    data = data.toString();
+    // Get rid of newline character "/r/n"
+    data = data.replace("\r\n", "");
+    // Filter motor movement results, which are hexadecimal numbers
+    if (data.startsWith("0x")) {
+        // Note: Don't use triple equals here
+        if (data == 0) {
+            // Motors are done moving
+            opo.status.motors_moving = false;
+            return;
+        }
+        // Motors are still moving
+        opo.status.motors_moving = true;
+        return;
+    }
+    // Convert data to number
+    data = parseFloat(data);
+    // Check if it's an error code
+    if (data < 10) {
+        parse_opo_error(data);
+        return;
+    }
+    // Only remaining option is it's the OPO's wavelength
+    update_opo_wavelength(data);
+});
+
+
+
+//
+//
+//
+//
+//
 
 const opo_client = new net.Socket();
 
@@ -200,8 +402,11 @@ function when_motor_stopped() {
     } else {
         console.log("Motors done moving!");
         console.timeEnd("Change WL");
+        // Get OPO's recorded wavelength
+        get_opo_wavelength();
         // Measure the wavelength
-        wavelength_measure(50);
+        setTimeout(() => {wavelengths.measure(50)}, 10000 /* ms */)
+        //wavelengths.measure();
     }
 }
 
@@ -250,7 +455,7 @@ function parse_opo_error(error_code) {
         "No USB Voltmeter Detected"
     ];
     // Print the error to console
-    console.log("OPO Error: " + opo_errors[error_code]);
+    console.log(`OPO Error #${error_code}: ${opo_errors[error_code]}`);
 }
 
 // Update nIR wavelength value given by OPO
@@ -260,15 +465,6 @@ function update_opo_wavelength(wavelength) {
 }
 
 /* Functions for Wavelength Conversion */
-
-function update_ir_wavelength(wavelength) {
-    // Make sure it's a true value (i.e. within bounds of nIR)
-    if (wavelength < laser.excitation.control.nir_lower_bound || wavelength > laser.excitation.control.nir_upper_bound) {
-        return;
-    }
-    laser.excitation.wavelength.input = wavelength;
-    laser.excitation.convert();
-}
 
 // Process and track info relating to lasers
 const laser = {
@@ -356,37 +552,12 @@ function laser_excitation_convert() {
 
 // Move OPO/A to specific laser energy (in cm^-1)
 function laser_excitation_control_goto(wavenumber, use_nm) {
-    let nir_wl;
-    let nir_wn;
-    let desired_mode;
-    let yag_wl = laser.excitation.wavelength.yag_fundamental; // YAG fundamental (nm)
-	let yag_wn = decimal_round(laser.convert_wn_wl(yag_wl), 3); // YAG fundamental (cm^-1)
     if (use_nm) {
         wavenumber = laser.convert_wn_wl(wavenumber);
     }
-    // Figure out which energy regime wavenumber is in
-    if (11355 < wavenumber && wavenumber < 14080) {
-        // Near IR
-        desired_mode = "nir";
-        nir_wl = decimal_round(laser.convert_wn_wl(wavenumber), 4);
-    } else if (4500 < wavenumber && wavenumber < 7400) {
-        // Intermediate IR
-        desired_mode = "iir";
-        nir_wn = 2 * yag_wn - wavenumber;
-        nir_wl = decimal_round(laser.convert_wn_wl(nir_wn), 4);
-    } else if (2000 < wavenumber && wavenumber < 4500) {
-        // Mid IR
-        desired_mode = "mir";
-        nir_wn = yag_wn + wavenumber;
-        nir_wl = decimal_round(laser.convert_wn_wl(nir_wn), 4);
-    } else if (625 < wavenumber && wavenumber < 2000) {
-        // Far IR
-        desired_mode = "fir";
-        nir_wn = (3 * yag_wn - wavenumber) / 2;
-        nir_wl = decimal_round(laser.convert_wn_wl(nir_wn), 4);
-    } else {
-        // Photon energy out of range
-        console.log("OPO GOTO: Wavelength Out of Range");
+    let [desired_mode, nir_wl] = get_nir_wavelength(wavenumber);
+    if (!desired_mode) {
+        // Wavelength was out of range
         return;
     }
     // Update values
@@ -398,6 +569,41 @@ function laser_excitation_control_goto(wavenumber, use_nm) {
     console.log(`Detected IR mode: ${desired_mode}`);
     console.log(`Going to Wavelength: ${nir_wl} nm to get hv: ${wavenumber} cm^-1`);
     go_to_wl(nir_wl);
+}
+
+// Paired with previous function, get the nIR wavelength from IR energy in wavenumbers
+function get_nir_wavelength(wavenumber) {
+    let nir_wl;
+    let nir_wn;
+    let desired_mode;
+    let yag_wl = laser.excitation.wavelength.yag_fundamental; // YAG fundamental (nm)
+	let yag_wn = decimal_round(laser.convert_wn_wl(yag_wl), 3); // YAG fundamental (cm^-1)
+    // Figure out which energy regime wavenumber is in
+    if (11355 < wavenumber && wavenumber < 14080) {
+        // Near IR
+        desired_mode = "nir";
+        nir_wl = decimal_round(laser.convert_wn_wl(wavenumber), 4);
+    } else if (4500 < wavenumber && wavenumber < 7400) {
+        // Intermediate IR
+        desired_mode = "iir";
+        nir_wn = 2 * yag_wn - wavenumber;
+        nir_wl = decimal_round(laser.convert_wn_wl(nir_wn), 4);
+    } else if (2000 < wavenumber && wavenumber <= 4500) {
+        // Mid IR
+        desired_mode = "mir";
+        nir_wn = yag_wn + wavenumber;
+        nir_wl = decimal_round(laser.convert_wn_wl(nir_wn), 4);
+    } else if (625 < wavenumber && wavenumber <= 2000) {
+        // Far IR
+        desired_mode = "fir";
+        nir_wn = (3 * yag_wn - wavenumber) / 2;
+        nir_wl = decimal_round(laser.convert_wn_wl(nir_wn), 4);
+    } else {
+        // Photon energy out of range
+        console.log(`Energy of ${wavenumber} cm^-1 Out of Range`);
+        return [];
+    }
+    return [desired_mode, nir_wl];
 }
 
 
