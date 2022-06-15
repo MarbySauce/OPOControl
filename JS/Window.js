@@ -31,8 +31,8 @@ const opo = {
         command: {
             get_wl: "TELLWL",
             get_motor_status: "TELLSTAT",
-            move_fast: "SETSP 3.0", // Move 3 nm/sec
-            move_slow: "SETSP 0.66", // Move 0.66 nm/sec
+            move_fast: "SETSPD 3.0", // Move 3 nm/sec
+            move_slow: "SETSPD 0.66", // Move 0.66 nm/sec
             move: (val) => { return "GOTO " + val.toFixed(3) },
         },
         connect: () => { opo.network.client.connect(opo.network.config, () => {}) },
@@ -45,7 +45,7 @@ const opo = {
     params: {
         lower_wl_bound: 710,
         upper_wl_bound: 880,
-        expected_shift: 0.3 // nm
+        expected_shift: 0.257 // nm
     },
     /**
      * Get the nIR wavelength recorded by the OPO
@@ -82,7 +82,7 @@ const opo = {
      * @param {number} error_code - code returned by OPO
      * @returns 
      */
-    parse_error: (error_code) => opo_parse_error(),
+    parse_error: (error_code) => opo_parse_error(error_code),
 }
 
 // Tell OPO to move to nir wavelength
@@ -343,12 +343,13 @@ async function move_to_ir(wavenumber, use_nm) {
 
     const opo_movements = {
         first: undefined,
-        second: undefined
-    }
+        second: undefined,
+        final: undefined, // No matter how many iterations done, final is filled with last measurement
+    };
 
     // Change OPO wavelength and measure
     let iterations = 0;
-    let measured = await move_to_ir_once(nir_wl, desired_mode, wavenumber);
+    let measured = await move_to_ir_once(nir_wl + opo.params.expected_shift, desired_mode, wavenumber);
 
     opo_movements.first = measured;
 
@@ -356,7 +357,7 @@ async function move_to_ir(wavenumber, use_nm) {
         // Not close enough, need to iterate
         // Check that it's not trying to move too far (i.e. wavelength measurement isn't off)
         if (Math.abs(measured.wl_difference) < 1.5) {
-            measured = await move_to_ir_once(nir_wl + measured.wl_difference, desired_mode, wavenumber); 
+            measured = await move_to_ir_once(nir_wl + opo.params.expected_shift + measured.wl_difference, desired_mode, wavenumber); 
             // (Update the nIR to account for offset, but still give original desired energy)
             
         } else {
@@ -367,6 +368,8 @@ async function move_to_ir(wavenumber, use_nm) {
 
         opo_movements.second = measured;
     }
+
+    opo_movements.final = measured;
 
     /*while (Math.abs(measured.energy_difference) > 0.3) {
         // Not close enough, need to iterate
@@ -388,7 +391,7 @@ async function move_to_ir_once(desired_nir_wl, desired_mode, desired_wavenumber)
     let cmd_success = opo.goto_nir(desired_nir_wl + 1);
     // Make sure command was successful
     if (!cmd_success) {
-        console.log(`Could not move to wavelength 2 nm away from IR energy of ${desired_wavenumber} cm-1`);
+        console.log(`Could not move to wavelength 1 nm away from IR energy of ${desired_wavenumber} cm-1`);
         return;
     }
 
@@ -421,21 +424,22 @@ async function move_to_ir_once(desired_nir_wl, desired_mode, desired_wavenumber)
     let wl_measurements = await measure_reduced_wavelength();
 
     // Check if measured wavelength is far from expected
-    if (Math.abs(wl_measurements.average - opo.status.current_wavelength) > 1.5) {
+    if (Math.abs(wl_measurements.final.average - opo.status.current_wavelength) > 1.5) {
         // Remeasure wavelength
+        console.log("Remeasuring wavelength");
         wl_measurements = await measure_reduced_wavelength();
     }
 
     // Figure out difference between desired and measured energy and nIR wavelength
-    const converted_energy = convert(wl_measurements.average);
+    const converted_energy = convert(wl_measurements.final.average);
     const measured_energy = converted_energy[desired_mode].wavenumber;
     const measured = {
         desired_wl: desired_nir_wl,
         desired_energy: desired_wavenumber,
-        wavelength: wl_measurements.average,
+        wavelength: wl_measurements.final.average,
         energy: measured_energy,
         opo_wl: opo.status.current_wavelength,
-        wl_difference: desired_nir_wl - wl_measurements.average,
+        wl_difference: desired_nir_wl - wl_measurements.final.average,
         energy_difference: desired_wavenumber - measured_energy,
         wl_measurements: wl_measurements
     }
@@ -459,7 +463,7 @@ async function wait_for_motors() {
 // Measure wavelengths and find reduced average (asynchronous)
 async function measure_reduced_wavelength() {
 	const measured_values = [];
-	let measured_value_length = 50; // Number of wavelengths to measure
+	let measured_value_length = 200; //50; // Number of wavelengths to measure
 	let minimum_stdev = 0.01; // Reduce wavelength array until stdev is below this value
 	let minimum_length = 10; // Minimum number of wavelengths to keep during reduction
 	let max_iteration_count = 10; // Maximum number of iterations in reduction
@@ -494,18 +498,23 @@ async function measure_reduced_wavelength() {
 // Calculate average and filter outliers until standard deviation is small enough
 function get_reduced_average(values, minimum_stdev, minimum_length, max_iteration_count) {
 	let iteration_count = 0; // Keep track of how many iterations were used to get reduced average
-	let avg;
-	let stdev = 100;
+	
+    let [avg, stdev] = average(values);
 	const reduced_avg_results = {
-		average: 0,
-		stdev: 0,
+        initial: {
+            average: avg,
+            stdev: stdev,
+            values: values,
+        },
+        final: {
+            average: 0,
+            stdev: 0,
+            values: []
+        },
 		iteration_count: 0,
-		initial_values: values,
-		final_values: [],
 	};
 
 	while (stdev > minimum_stdev) {
-		[avg, stdev] = average(values);
 		if (values.length < minimum_length || iteration_count > max_iteration_count) {
 			break;
 		}
@@ -513,12 +522,16 @@ function get_reduced_average(values, minimum_stdev, minimum_length, max_iteratio
 		values = values.filter((val) => avg - stdev < val && val < avg + stdev);
 		// Uptick reduction iteration counter
 		iteration_count++;
+
+        [avg, stdev] = average(values);
 	}
 
-	reduced_avg_results.average = avg;
-	reduced_avg_results.stdev = stdev;
+	reduced_avg_results.final = {
+        average: avg,
+        stdev: stdev,
+        values: values,
+    };
 	reduced_avg_results.iteration_count = iteration_count;
-	reduced_avg_results.final_values = values;
 
 	return reduced_avg_results;
 }
@@ -552,18 +565,24 @@ async function scanning_mode() {
 	/*// fIR 2
     let starting_energy = 1500;
     let ending_energy = 1530;*/
+    /*// mIR 3
+	let starting_energy = 3770;
+	let ending_energy = 3800;*/
 	let energy_step = 1.5;
 	const energies = [];
 	const measurement_results = [];
+    const wl_shifts = [];
 	let measured;
 	for (let energy = starting_energy; energy <= ending_energy; energy += energy_step) {
 		measured = await move_to_ir(energy);
-		energies.push(measured.energy);
+		energies.push(measured.final.energy);
 		measurement_results.push(measured);
+        wl_shifts.push(measured.final.wl_difference);
 		// Wait 10s as a stand-in for data collection
 		await new Promise((resolve) => setTimeout(() => resolve(), 10000));
 	}
 	console.log("Done!", energies);
+    console.log("Average wl shift:", average(wl_shifts));
 	console.timeEnd("Scanning");
 	console.log(`Subtract ${10 * energies.length}s off time`);
 

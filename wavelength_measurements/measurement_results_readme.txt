@@ -1,6 +1,6 @@
 Information for measurement_results_Xir_N.json files
 
-6/15/22
+6/14/22
 array contains objects with: 
 	desired_wl 
 	desired_energy
@@ -18,5 +18,38 @@ array contains objects with:
 mir_1: (3750 - 3780 cm-1) (~760 nm nIR) Allow up to 4 iterations after first movement
 mir_2: (3750 - 3780 cm-1) (~760 nm nIR) Only allow 1 iteration after first movement 
 mir_3: (3925 - 2955 cm-1) (~750 nm nIR) " " " "
+mir_4: (3750 - 3780 cm-1) (~760 nm nIR) " " " "
 fir_1: (1845 - 1875 cm-1) (~760 nm nIR) " " " " 
 fir_2: (1500 - 1530 cm-1) (~750 nm nIR) " " " " 
+
+
+
+6/15/22
+array contains objects with:
+	first - first opo mvmt (contains same as below)
+	second - second opo mvmt (contains same as below)
+	final - last (first or second) opo mvmt 
+		desired_wl
+		desired_energy
+		wavelength
+		energy
+		opo_wl
+		wl_difference
+		energy_difference
+		wl_measurements
+			initial (before reduction)
+				average 
+				stdev 
+				values 
+			final (after reduction)
+				average 
+				stdev
+				values
+			iteration_count (reduction iterations)
+
+All of these have a default to move to nIR + expected shift of 0.25 nm if wl > 1.5 +- opo_wl 
+
+mir_5: (3750 - 3780 cm-1) (~760 nm nIR) Only allow 1 iteration after first movement
+mir_6: (3770 - 3800 cm-1) (~759 nm nIR) " " " " and initially go to desired + expected shift (0.25 nm)
+fir_3: (1845 - 1875 cm-1) (~760 nm nIR) " " " " " " " "
+mir_7: (3750 - 3780 cm-1) (~760 nm nIR) " ^ ", avg wavelengths for 200 instead of 50, use 0.257 nm shift 
