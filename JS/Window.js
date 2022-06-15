@@ -12,8 +12,10 @@ window.onload = function () {
 
 function startup() {
     laser.excitation.mode = 'mir';
-    //init_opo();
+    // Connect to OPO
     opo.network.connect();
+    // Set OPO speed as slow
+    opo.move_slow();
 }
 
 /* Functions for OPO */
@@ -43,6 +45,7 @@ const opo = {
     params: {
         lower_wl_bound: 710,
         upper_wl_bound: 880,
+        expected_shift: 0.3 // nm
     },
     /**
      * Get the nIR wavelength recorded by the OPO
@@ -66,6 +69,14 @@ const opo = {
      * @param {number} nir_wavelength - nIR wavelength (nm)
      */
     goto_nir: (nir_wavelength) => opo_goto_nir(nir_wavelength),
+    /**
+     * Set OPO motor speed as 3 nm/sec
+     */
+    move_fast: () => { opo.network.client.write(opo.network.command.move_fast, () => {}) },
+    /**
+     * Set OPO motor speed as 0.66 nm/sec
+     */
+    move_slow: () => { opo.network.client.write(opo.network.command.move_slow, () => {}) },
     /**
      * Parse error returned by OPO
      * @param {number} error_code - code returned by OPO
@@ -338,15 +349,31 @@ async function move_to_ir(wavenumber, use_nm) {
     }
     console.log("Desired nIR", nir_wl);
 
+    const opo_movements = {
+        first: undefined,
+        second: undefined
+    }
+
     // Change OPO wavelength and measure
     let iterations = 0;
     let measured = await move_to_ir_once(nir_wl, desired_mode, wavenumber);
 
+    opo_movements.first = measured;
+
     if (Math.abs(measured.energy_difference) > 0.3) {
         // Not close enough, need to iterate
-        measured = await move_to_ir_once(nir_wl + measured.wl_difference, desired_mode, wavenumber); 
-        // (Update the nIR to account for offset, but still give original desired energy)
+        // Check that it's not trying to move too far (i.e. wavelength measurement isn't off)
+        if (Math.abs(measured.wl_difference) < 1.5) {
+            measured = await move_to_ir_once(nir_wl + measured.wl_difference, desired_mode, wavenumber); 
+            // (Update the nIR to account for offset, but still give original desired energy)
+            
+        } else {
+            console.log(`Moving nIR by expected shift of ${opo.params.expected_shift} nm`);
+            measured = await move_to_ir_once(nir_wl + opo.params.expected_shift, desired_mode, wavenumber); 
+        }
         iterations++;
+
+        opo_movements.second = measured;
     }
 
     /*while (Math.abs(measured.energy_difference) > 0.3) {
@@ -360,7 +387,7 @@ async function move_to_ir(wavenumber, use_nm) {
         }
     } */
     console.log(`${iterations} iterations`, measured);
-    return measured;
+    return opo_movements;
 }
 
 // Single iteration of moving OPO wavelength and measuring actual wavelength
@@ -399,7 +426,13 @@ async function move_to_ir_once(desired_nir_wl, desired_mode, desired_wavenumber)
     await new Promise(resolve => setTimeout(() => resolve(), 10000));
 
     // Measure wavelength with reduced averaging
-    const wl_measurements = await measure_reduced_wavelength();
+    let wl_measurements = await measure_reduced_wavelength();
+
+    // Check if measured wavelength is far from expected
+    if (Math.abs(wl_measurements.average - opo.status.current_wavelength) > 1.5) {
+        // Remeasure wavelength
+        wl_measurements = await measure_reduced_wavelength();
+    }
 
     // Figure out difference between desired and measured energy and nIR wavelength
     const converted_energy = convert(wl_measurements.average);
