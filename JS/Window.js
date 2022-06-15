@@ -2,7 +2,7 @@
 
 // OPO/A is controlled through TCP communication, which is done through JS module Net
 const net = require("net");
-//const fs = require("fs");
+const fs = require("fs");
 // Wavemeter is controlled through C++, which requires node addons
 const wavemeter = require("bindings")("wavemeter");
 
@@ -94,7 +94,7 @@ function opo_goto_nir(nir_wavelength) {
 // Update nIR wavelength value given by OPO
 function opo_update_wavelength(wavelength) {
     console.log("Wavelength:", wavelength);
-    opo.status.current_wl = wavelength;
+    opo.status.current_wavelength = wavelength;
 }
 
 // Parse OPO error
@@ -342,7 +342,14 @@ async function move_to_ir(wavenumber, use_nm) {
     let iterations = 0;
     let measured = await move_to_ir_once(nir_wl, desired_mode, wavenumber);
 
-    while (Math.abs(measured.energy_difference) > 0.3) {
+    if (Math.abs(measured.energy_difference) > 0.3) {
+        // Not close enough, need to iterate
+        measured = await move_to_ir_once(nir_wl + measured.wl_difference, desired_mode, wavenumber); 
+        // (Update the nIR to account for offset, but still give original desired energy)
+        iterations++;
+    }
+
+    /*while (Math.abs(measured.energy_difference) > 0.3) {
         // Not close enough, need to iterate
         measured = await move_to_ir_once(nir_wl + measured.wl_difference, desired_mode, wavenumber); 
         // (Update the nIR to account for offset, but still give original desired energy)
@@ -351,7 +358,7 @@ async function move_to_ir(wavenumber, use_nm) {
         if (iterations > 3) {
             break;
         }
-    } 
+    } */
     console.log(`${iterations} iterations`, measured);
     return measured;
 }
@@ -385,20 +392,27 @@ async function move_to_ir_once(desired_nir_wl, desired_mode, desired_wavenumber)
     // Wait for motors to stop moving (asynchronous)
     motor_movement = await wait_for_motors();
 
+    // Ask the OPO what it thinks its wavelength is
+    opo.get_wavelength();
+
     // After motors stopped moving, wait 10s for wavelength to settle
     await new Promise(resolve => setTimeout(() => resolve(), 10000));
 
     // Measure wavelength with reduced averaging
-    const measured_wl = await measure_reduced_wavelength();
+    const wl_measurements = await measure_reduced_wavelength();
 
     // Figure out difference between desired and measured energy and nIR wavelength
-    const converted_energy = convert(measured_wl);
+    const converted_energy = convert(wl_measurements.average);
     const measured_energy = converted_energy[desired_mode].wavenumber;
     const measured = {
-        wavelength: measured_wl,
+        desired_wl: desired_nir_wl,
+        desired_energy: desired_wavenumber,
+        wavelength: wl_measurements.average,
         energy: measured_energy,
-        wl_difference: desired_nir_wl - measured_wl,
-        energy_difference: desired_wavenumber - measured_energy
+        opo_wl: opo.status.current_wavelength,
+        wl_difference: desired_nir_wl - wl_measurements.average,
+        energy_difference: desired_wavenumber - measured_energy,
+        wl_measurements: wl_measurements
     }
 
     return measured;
@@ -453,6 +467,14 @@ async function measure_reduced_wavelength() {
 function get_reduced_average(values, minimum_stdev, minimum_length, max_iteration_count) {
     let iteration_count = 0; // Keep track of how many iterations were used to get reduced average
     let avg; let stdev = 100;
+    const reduced_avg_results = {
+        average: 0,
+        stdev: 0,
+        iteration_count: 0,
+        initial_values: values,
+        final_values: [],
+    };
+
     while (stdev > minimum_stdev) {
         [avg, stdev] = average(values);
         if (values.length < minimum_length || iteration_count > max_iteration_count) {
@@ -463,7 +485,13 @@ function get_reduced_average(values, minimum_stdev, minimum_length, max_iteratio
         // Uptick reduction iteration counter
         iteration_count++;
     }
-    return avg;
+    
+    reduced_avg_results.average = avg;
+    reduced_avg_results.stdev = stdev;
+    reduced_avg_results.iteration_count = iteration_count;
+    reduced_avg_results.final_values = values;
+
+    return reduced_avg_results;
 }
 
 // Get the average and standard deviation of an array
@@ -480,19 +508,60 @@ function average(array) {
 
 // Simulate scanning mode
 async function scanning_mode() {
+    // Make sure screen stays awake
+    await request_wake_lock();
+
     console.time("Scanning");
+    // mIR
     let starting_energy = 3750;
     let ending_energy = 3780;
+    /*// fIR
+    let starting_energy = 1845;
+    let ending_energy = 1875;*/
+    /*// mIR 2
+    let starting_energy = 3925;
+    let ending_energy = 3955; */
+    /*// fIR 2
+    let starting_energy = 1500;
+    let ending_energy = 1530;*/
     let energy_step = 1.5;
     const energies = [];
+    const measurement_results = [];
     let measured;
     for (let energy = starting_energy; energy <= ending_energy; energy += energy_step) {
         measured = await move_to_ir(energy);
         energies.push(measured.energy);
+        measurement_results.push(measured);
         // Wait 10s as a stand-in for data collection
         await new Promise(resolve => setTimeout(() => resolve(), 10000));
     }
     console.log("Done!", energies);
     console.timeEnd("Scanning");
     console.log(`Subtract ${10 * energies.length}s off time`);
+
+    // Save measurement results to file
+    let save_string = JSON.stringify(measurement_results, null, "\t");
+    fs.writeFile("./wavelength_measurements/measurement_results.json", save_string, () => {});
+
+    // Let screen sleep
+    if (wake_lock) {
+        wake_lock.release();
+    }
+}
+
+
+// Functions for keeping screen awake
+let wake_lock = null;
+
+// Keep screen awake
+async function request_wake_lock() {
+    try {
+        wake_lock = await navigator.wakeLock.request();
+        // Use wake_lock.release() to release
+        wake_lock.addEventListener("release", () => {
+            wake_lock = null;
+        });
+    } catch (err) {
+        console.log(`Screen lock error: ${err.name}, ${err.message}`);
+    }
 }
