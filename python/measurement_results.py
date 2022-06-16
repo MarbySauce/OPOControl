@@ -1,6 +1,7 @@
 # Imports
 import matplotlib.pyplot as plt
 import json 
+from math import sqrt
 
 # Analyze the measurement results (OPO scanning tests)
 # Objects' subclasses detailed in measurement results readme
@@ -8,12 +9,12 @@ import json
 # Variables to edit
 
 file_name = "mir_7"			# Name of .json file to look at
-desired_energy = 0			# Specific energy measurement to analyze
+desired_energy = 3777			# Specific energy measurement to analyze
 
 base_file = "./wavelength_measurements/measurement_results_"
 full_file_name = base_file + file_name + ".json"
 
-run_test = False			# Whether to run the test() function (True) or main() function (False)
+run_test = True 			# Whether to run the test() function (True) or main() function (False)
 
 
 # Function to run on execution
@@ -49,9 +50,23 @@ def main():
 
 # Test function to run in test mode
 def test():
-	desired_values = "initial_values"
-	desired_values = desired_values[:-7]
-	print(desired_values)
+	print(f"Looking at {file_name}")
+	results = parse_json(full_file_name)
+
+	# Looking at bad measurement
+	result = results[18]
+	initial_values = result["final"]["wl_measurements"]["initial"]["values"]
+	final_values = result["final"]["wl_measurements"]["final"]["values"]
+	# Get average and stdev of initial measurement
+	avg, stdev = get_average(initial_values)
+	print(f"Initial avg: {avg:.3f}, stdev: {stdev:.5f}")
+
+	expected_wl = result["first"]["desired_wl"]
+	reduced_values = [val for val in initial_values if (abs(val - expected_wl) < 1)]
+	
+	# Get average and stdev of reduced values
+	avg, stdev = get_average(reduced_values)
+	print(f"Reduced avg: {avg:.3f}, stdev: {stdev:.5f}")
 
 
 
@@ -200,6 +215,11 @@ def plot_wavelength_hist(results: list, desired_energy: float):
 	plt.xlabel("Measured nIR wavelength (nm)")
 	plt.ylabel("Count")
 
+# Get average and stdev of an array
+def get_average(array):
+	avg = sum(array) / len(array)
+	stdev = sqrt(sum([(el - avg)**2 for el in array]) / len(array))
+	return avg, stdev
 
 
 
