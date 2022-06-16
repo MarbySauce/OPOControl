@@ -3,14 +3,17 @@ import matplotlib.pyplot as plt
 import json 
 
 # Analyze the measurement results (OPO scanning tests)
+# Objects' subclasses detailed in measurement results readme
 
 # Variables to edit
 
-file_name = "mir_3"			# Name of .json file to look at
-desired_energy = 1524		# Specific energy measurement to analyze
+file_name = "mir_7"			# Name of .json file to look at
+desired_energy = 0			# Specific energy measurement to analyze
 
 base_file = "./wavelength_measurements/measurement_results_"
 full_file_name = base_file + file_name + ".json"
+
+run_test = False			# Whether to run the test() function (True) or main() function (False)
 
 
 # Function to run on execution
@@ -31,14 +34,24 @@ def main():
 
 	# Plot measured wavelengths for a specific desired energy
 	# Make sure desired energy is actually within range
-	if results[0]["desired_energy"] <= desired_energy <= results[-1]["desired_energy"]:
-		plot_wavelength_hist(results, desired_energy)
+	if "final" in results[0]:
+		if results[0]["final"]["desired_energy"] <= desired_energy <= results[-1]["final"]["desired_energy"]:
+			plot_wavelength_hist(results, desired_energy)
+	else:
+		if results[0]["desired_energy"] <= desired_energy <= results[-1]["desired_energy"]:
+			plot_wavelength_hist(results, desired_energy)
 
 
 
 	# Show plots
 	plt.show()
 
+
+# Test function to run in test mode
+def test():
+	desired_values = "initial_values"
+	desired_values = desired_values[:-7]
+	print(desired_values)
 
 
 
@@ -53,8 +66,16 @@ def parse_json(file_name):
 def plot_wavelengths(results: list):
 	fig, ax1 = plt.subplots()
 	increments = [i for i in range(len(results))]
-	expected = [result["desired_energy"] for result in results]
-	measured = [result["energy"] for result in results]
+	# Figure out whether the file is from 6/14/22 or 6/15/22
+	if "final" in results[0]:
+		# Version from 6/15/22
+		expected = [result["final"]["desired_energy"] for result in results]
+		measured = [result["final"]["energy"] for result in results]
+	else:
+		# Version from 6/14/22
+		expected = [result["desired_energy"] for result in results]
+		measured = [result["energy"] for result in results]
+	# Calculate absolute difference
 	difference = [abs(expect - measure) for expect, measure in zip(expected, measured)]
 	# Plot expected and measured values as scatter plot
 	color = "C1"
@@ -76,16 +97,32 @@ def plot_wavelengths(results: list):
 
 # Get average, max, and min absolute errors of energy from expected
 def get_errors(results: list):
-	expected = [result["desired_energy"] for result in results]
-	measured = [result["energy"] for result in results]
+	# Figure out whether the file is from 6/14/22 or 6/15/22
+	if "final" in results[0]:
+		# Version from 6/15/22
+		expected = [result["final"]["desired_energy"] for result in results]
+		measured = [result["final"]["energy"] for result in results]
+	else:
+		# Version from 6/14/22
+		expected = [result["desired_energy"] for result in results]
+		measured = [result["energy"] for result in results]
+	# Calculate absolute difference
 	difference = [abs(expect - measure) for expect, measure in zip(expected, measured)]
 	average = sum(difference) / len(difference)
 	return average, max(difference), min(difference)
 
 # Same as above but exclude errors >= 5 cm-1 
 def get_reduced_errors(results: list):
-	expected = [result["desired_energy"] for result in results]
-	measured = [result["energy"] for result in results]
+	# Figure out whether the file is from 6/14/22 or 6/15/22
+	if "final" in results[0]:
+		# Version from 6/15/22
+		expected = [result["final"]["desired_energy"] for result in results]
+		measured = [result["final"]["energy"] for result in results]
+	else:
+		# Version from 6/14/22
+		expected = [result["desired_energy"] for result in results]
+		measured = [result["energy"] for result in results]
+	# Calculate absolute difference
 	difference = [abs(expect - measure) for expect, measure in zip(expected, measured)]
 	reduced_difference = [diff for diff in difference if diff < 5]
 	average = sum(reduced_difference) / len(reduced_difference)
@@ -101,19 +138,39 @@ def get_wavelength_hist(result: dict, desired_values: str = "initial_values"):
 	if desired_values not in ["initial_values", "final_values"]:
 		# Incorrect argument passed, default to initial values
 		desired_values = "initial_values"
-	# Get tally of wavelength values and count
-	for wavelength in result["wl_measurements"][desired_values]:
-		# Get rid of floating point errors
-		wavelength = round(wavelength, 3)
-		# Check if wavelength is already stored in wavelength_values
-		if wavelength in wavelength_values:
-			# It is, find index and add to count
-			wl_index = wavelength_values.index(wavelength)
-			wavelength_count[wl_index] += 1
-		else:
-			# It is not, add to list and start count at 1
-			wavelength_values.append(wavelength)
-			wavelength_count.append(1)
+	# Figure out whether the file is from 6/14/22 or 6/15/22
+	if "final" in result:
+		# Version from 6/15/22
+		# Remove "_values" from desired_values
+		desired_values = desired_values[:-7]
+		# Get tally of wavelength values and count
+		for wavelength in result["final"]["wl_measurements"][desired_values]["values"]:
+			# Get rid of floating point errors
+			wavelength = round(wavelength, 3)
+			# Check if wavelength is already stored in wavelength_values
+			if wavelength in wavelength_values:
+				# It is, find index and add to count
+				wl_index = wavelength_values.index(wavelength)
+				wavelength_count[wl_index] += 1
+			else:
+				# It is not, add to list and start count at 1
+				wavelength_values.append(wavelength)
+				wavelength_count.append(1)
+	else:
+		# Version from 6/14/22
+		# Get tally of wavelength values and count
+		for wavelength in result["wl_measurements"][desired_values]:
+			# Get rid of floating point errors
+			wavelength = round(wavelength, 3)
+			# Check if wavelength is already stored in wavelength_values
+			if wavelength in wavelength_values:
+				# It is, find index and add to count
+				wl_index = wavelength_values.index(wavelength)
+				wavelength_count[wl_index] += 1
+			else:
+				# It is not, add to list and start count at 1
+				wavelength_values.append(wavelength)
+				wavelength_count.append(1)
 	# Sort results by wavelength
 	wavelength_values, wavelength_count = zip(*sorted(zip(wavelength_values, wavelength_count), key=lambda x: x[0]))
 	# Return values as lists (idk I prefer [] over () )
@@ -121,11 +178,20 @@ def get_wavelength_hist(result: dict, desired_values: str = "initial_values"):
 
 # Plot histogram of measured wavelengths (for one desired energy)
 def plot_wavelength_hist(results: list, desired_energy: float):
-	# Get dict with desired energy
-	result = next(result for result in results if result["desired_energy"] == desired_energy)
-	print(f"Expected nIR wavelength: {result['desired_wl']:.3f} nm, measured wavelength: {result['wavelength']:.3f} nm")
 	# Create new figure
 	plt.figure()
+	# Figure out whether the file is from 6/14/22 or 6/15/22
+	if "final" in results[0]:
+		# Version from 6/15/22
+		result = next(result for result in results if result["final"]["desired_energy"] == desired_energy)
+		print(f"Expected nIR wavelength: {result['final']['desired_wl']:.3f} nm, measured wavelength: {result['final']['wavelength']:.3f} nm")
+		plt.title(f"Expected energy: {desired_energy}" + " $cm^{-1}$" + "\n" + f"Measured energy: {result['final']['energy']}" + " $cm^{-1}$")
+	else:
+		# Version from 6/14/22
+		# Get dict with desired energy
+		result = next(result for result in results if result["desired_energy"] == desired_energy)
+		print(f"Expected nIR wavelength: {result['desired_wl']:.3f} nm, measured wavelength: {result['wavelength']:.3f} nm")
+		plt.title(f"Expected energy: {desired_energy}" + " $cm^{-1}$" + "\n" + f"Measured energy: {result['energy']}" + " $cm^{-1}$")
 	# Plot the initial values
 	plt.scatter(*get_wavelength_hist(result, "initial_values"))
 	# Plot the final (reduced) values
@@ -133,11 +199,13 @@ def plot_wavelength_hist(results: list, desired_energy: float):
 	# Add labels
 	plt.xlabel("Measured nIR wavelength (nm)")
 	plt.ylabel("Count")
-	plt.title(f"Expected energy: {desired_energy}" + " $cm^{-1}$" + "\n" + f"Measured energy: {result['energy']}" + " $cm^{-1}$")
 
 
 
 
 
 if __name__ == "__main__":
-	main()
+	if run_test:
+		test()
+	else:
+		main()
