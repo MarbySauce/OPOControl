@@ -107,10 +107,10 @@ function opo_goto_nir(nir_wavelength) {
 		return false;
 	}
 	// Make sure wavelength isn't too close to current wavelength
-	if (Math.abs(nir_wavelength - opo.status.current_wavelength) < 0.005) {
+	/*if (Math.abs(nir_wavelength - opo.status.current_wavelength) < 0.005) {
 		console.log("Wavelength too close to current wavelength");
 		return false;
-	}
+	}*/ 
 	opo.status.motors_moving = true;
 	opo.network.client.write(opo.network.command.move(nir_wavelength), () => {});
 	return true;
@@ -476,7 +476,7 @@ async function wait_for_motors() {
 // Measure wavelengths and find reduced average (asynchronous)
 async function measure_reduced_wavelength(expected_wl) {
 	const measured_values = [];
-	let measured_value_length = 200; //50; // Number of wavelengths to measure
+	let measured_value_length = 50; // Number of wavelengths to measure
 	let minimum_stdev = 0.01; // Reduce wavelength array until stdev is below this value
 	let minimum_length = 10; // Minimum number of wavelengths to keep during reduction
 	let too_far_val = 1; // nm, wavelength values too_far_val nm away from expected will be removed (if expected_wl given)
@@ -575,12 +575,12 @@ async function scanning_mode() {
 	await request_wake_lock();
 
 	console.time("Scanning");
-	// mIR
+	/*// mIR
 	let starting_energy = 3750;
-	let ending_energy = 3780;
-	/*// fIR
+	let ending_energy = 3780;*/
+	// fIR
     let starting_energy = 1845;
-    let ending_energy = 1875;*/
+    let ending_energy = 1875;
 	/*// mIR 2
     let starting_energy = 3925;
     let ending_energy = 3955; */

@@ -60,3 +60,11 @@ mir_7: (3750 - 3780 cm-1) (~760 nm nIR) " ^ ", avg wavelengths for 200 instead o
 		So the OPO was actually where it should be, and this would probably be a valid measurement. Need to come up 
 			with a way to combat this 
 	If you remove values more than 1 nm away from desired wl, you get an avg, stdev of 759.194, 0.0733 (without reduction)
+
+
+
+6/16/22
+measure_reduced_wavelength() now removes values > +- 1nm away from the desired nIR wl when calculating 
+	the average wavelength. Also removed opo shift from 2nd iteration (so its not double counted)
+fir_4: (1845 - 1875 cm-1)
+fir_5: (  "  "   "   "  ) Going back to 50 wl measurements (from 200)
