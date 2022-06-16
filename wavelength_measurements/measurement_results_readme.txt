@@ -54,6 +54,7 @@ mir_6: (3770 - 3800 cm-1) (~759 nm nIR) " " " " and initially go to desired + ex
 fir_3: (1845 - 1875 cm-1) (~760 nm nIR) " " " " " " " "
 	2/3 of these (14 of 21) are shifted up by 10cm-1... Why?
 	The issue is adding in opo shift to the second iteration. It only shows an error when two iterations happen
+	If you look at the first iteration values (instead of final), average error goes from 5.88 cm-1 -> 0.382 cm-1
 mir_7: (3750 - 3780 cm-1) (~760 nm nIR) " ^ ", avg wavelengths for 200 instead of 50, use 0.257 nm shift 
 	This had one bad point (3777 cm-1) - Desired wl: 759.461, Measured wl: 725.264, OPO wl: 759.480
 		So the OPO was actually where it should be, and this would probably be a valid measurement. Need to come up 

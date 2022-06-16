@@ -8,13 +8,13 @@ from math import sqrt
 
 # Variables to edit
 
-file_name = "mir_7"			# Name of .json file to look at
-desired_energy = 3777			# Specific energy measurement to analyze
+file_name = "fir_3"			# Name of .json file to look at
+desired_energy = 3777		# Specific energy measurement to analyze
 
 base_file = "./wavelength_measurements/measurement_results_"
 full_file_name = base_file + file_name + ".json"
 
-run_test = True 			# Whether to run the test() function (True) or main() function (False)
+run_test = False 			# Whether to run the test() function (True) or main() function (False)
 
 
 # Function to run on execution
@@ -85,7 +85,8 @@ def plot_wavelengths(results: list):
 	if "final" in results[0]:
 		# Version from 6/15/22
 		expected = [result["final"]["desired_energy"] for result in results]
-		measured = [result["final"]["energy"] for result in results]
+		#measured = [result["final"]["energy"] for result in results]
+		measured = [result["first"]["energy"] for result in results]
 	else:
 		# Version from 6/14/22
 		expected = [result["desired_energy"] for result in results]
@@ -116,7 +117,8 @@ def get_errors(results: list):
 	if "final" in results[0]:
 		# Version from 6/15/22
 		expected = [result["final"]["desired_energy"] for result in results]
-		measured = [result["final"]["energy"] for result in results]
+		#measured = [result["final"]["energy"] for result in results]
+		measured = [result["first"]["energy"] for result in results]
 	else:
 		# Version from 6/14/22
 		expected = [result["desired_energy"] for result in results]
