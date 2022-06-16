@@ -434,13 +434,13 @@ async function move_to_ir_once(desired_nir_wl, desired_mode, desired_wavenumber)
 	await new Promise((resolve) => setTimeout(() => resolve(), 10000));
 
 	// Measure wavelength with reduced averaging
-	let wl_measurements = await measure_reduced_wavelength();
+	let wl_measurements = await measure_reduced_wavelength(desired_nir_wl);
 
 	// Check if measured wavelength is far from expected
 	if (Math.abs(wl_measurements.final.average - opo.status.current_wavelength) > 1.5) {
 		// Remeasure wavelength
 		console.log("Remeasuring wavelength");
-		wl_measurements = await measure_reduced_wavelength();
+		wl_measurements = await measure_reduced_wavelength(desired_nir_wl);
 	}
 
 	// Figure out difference between desired and measured energy and nIR wavelength
@@ -474,11 +474,12 @@ async function wait_for_motors() {
 }
 
 // Measure wavelengths and find reduced average (asynchronous)
-async function measure_reduced_wavelength() {
+async function measure_reduced_wavelength(expected_wl) {
 	const measured_values = [];
 	let measured_value_length = 200; //50; // Number of wavelengths to measure
 	let minimum_stdev = 0.01; // Reduce wavelength array until stdev is below this value
 	let minimum_length = 10; // Minimum number of wavelengths to keep during reduction
+	let too_far_val = 1; // nm, wavelength values too_far_val nm away from expected will be removed (if expected_wl given)
 	let max_iteration_count = 10; // Maximum number of iterations in reduction
 	let fail_count = 0; // Keep track of how many failed measurements there were
 	let wl;
@@ -505,11 +506,14 @@ async function measure_reduced_wavelength() {
 		}
 	}
 	// Now we have enough measurements - get rid of outliers until standard deviation is low enough
-	return get_reduced_average(measured_values, minimum_stdev, minimum_length, max_iteration_count);
+	return get_reduced_average(measured_values, minimum_stdev, minimum_length, max_iteration_count, expected_wl, too_far_val);
 }
 
 // Calculate average and filter outliers until standard deviation is small enough
-function get_reduced_average(values, minimum_stdev, minimum_length, max_iteration_count) {
+function get_reduced_average(values, minimum_stdev, minimum_length, max_iteration_count, expected_avg, too_far_val) {
+	// Expected_avg is the expected average and too_far_val is the value for which elements further than
+	//		that away from average will be removed before reduction
+	//	If ^ not provided, just does normal reduction
 	let iteration_count = 0; // Keep track of how many iterations were used to get reduced average
 
 	let [avg, stdev] = average(values);
@@ -526,6 +530,11 @@ function get_reduced_average(values, minimum_stdev, minimum_length, max_iteratio
 		},
 		iteration_count: 0,
 	};
+
+	if (expected_avg && too_far_val) {
+		// Reduce by taking away unexpected values
+		values = values.filter((val) => expected_avg - too_far_val < val && val < expected_avg + too_far_val);
+	}
 
 	while (stdev > minimum_stdev) {
 		if (values.length < minimum_length || iteration_count > max_iteration_count) {
