@@ -6,7 +6,7 @@ import json
 
 # Variables to edit
 
-file_name = "fir_2"			# Name of .json file to look at
+file_name = "mir_3"			# Name of .json file to look at
 desired_energy = 1524		# Specific energy measurement to analyze
 
 base_file = "./wavelength_measurements/measurement_results_"
