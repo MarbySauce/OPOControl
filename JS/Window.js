@@ -490,7 +490,9 @@ async function measure_reduced_wavelength(expected_wl) {
 				if (wl > 0) {
 					// Make sure we didn't get the same measurement twice by comparing against last measurement
 					if (wl !== measured_values.at(-1)) {
-						measured_values.push(wl);
+						if (Math.abs(wl - expected_wl) < too_far_val) {
+							measured_values.push(wl);
+						}
 					}
 				} else {
 					// Wavelength was not measured, uptick failure count
@@ -537,13 +539,14 @@ function get_reduced_average(values, minimum_stdev, minimum_length, max_iteratio
 	}
 
 	while (stdev > minimum_stdev) {
-		if (values.length < minimum_length || iteration_count > max_iteration_count) {
-			break;
-		}
 		// Filter out values more than 1 stdev away from average
 		values = values.filter((val) => avg - stdev < val && val < avg + stdev);
 		// Uptick reduction iteration counter
 		iteration_count++;
+
+		if (values.length < minimum_length || iteration_count > max_iteration_count) {
+			break;
+		}
 
 		[avg, stdev] = average(values);
 	}
@@ -578,9 +581,9 @@ async function scanning_mode() {
 	/*// mIR
 	let starting_energy = 3750;
 	let ending_energy = 3780;*/
-	// fIR
+	/*// fIR
     let starting_energy = 1845;
-    let ending_energy = 1875;
+    let ending_energy = 1875;*/
 	/*// mIR 2
     let starting_energy = 3925;
     let ending_energy = 3955; */
@@ -590,6 +593,9 @@ async function scanning_mode() {
 	/*// mIR 3
 	let starting_energy = 3770;
 	let ending_energy = 3800;*/
+	// mIR 4
+	let starting_energy = 3660;
+	let ending_energy = 3690;
 	let energy_step = 1.5;
 	const energies = [];
 	const measurement_results = [];
