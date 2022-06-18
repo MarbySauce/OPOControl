@@ -16,6 +16,12 @@ function startup() {
 	opo.network.connect();
 	// Set OPO speed as slow
 	opo.move_slow();
+	// Set up Mac wavemeter simulation function
+	initialize_mac_fn();
+	// Get OPO wavelength
+	setTimeout(() => {
+		opo.get_wavelength();
+	}, 1000);
 }
 
 /* Functions for OPO */
@@ -25,7 +31,8 @@ const opo = {
 	network: {
 		client: new net.Socket(),
 		config: {
-			host: "169.254.170.155",
+			host: "localhost",
+			//host: "169.254.170.155",
 			port: 1315,
 		},
 		command: {
@@ -51,7 +58,8 @@ const opo = {
 	params: {
 		lower_wl_bound: 710,
 		upper_wl_bound: 880,
-		expected_shift: 0.257, // nm
+		//expected_shift: 0.257, // nm
+		expected_shift: 0, // nm
 	},
 	/**
 	 * Get the nIR wavelength recorded by the OPO
@@ -110,7 +118,7 @@ function opo_goto_nir(nir_wavelength) {
 	/*if (Math.abs(nir_wavelength - opo.status.current_wavelength) < 0.005) {
 		console.log("Wavelength too close to current wavelength");
 		return false;
-	}*/ 
+	}*/
 	opo.status.motors_moving = true;
 	opo.network.client.write(opo.network.command.move(nir_wavelength), () => {});
 	return true;
@@ -412,7 +420,8 @@ async function move_to_ir_once(desired_nir_wl, desired_mode, desired_wavenumber)
 	let motor_movement = await wait_for_motors();
 
 	// After motors stopped moving, wait 5s to give motors a break
-	await new Promise((resolve) => setTimeout(() => resolve(), 5000));
+	//await new Promise((resolve) => setTimeout(() => resolve(), 5000));
+	await new Promise((resolve) => setTimeout(() => resolve(), 500));
 
 	/* Now move to desired wavelength */
 
@@ -431,7 +440,8 @@ async function move_to_ir_once(desired_nir_wl, desired_mode, desired_wavenumber)
 	opo.get_wavelength();
 
 	// After motors stopped moving, wait 10s for wavelength to settle
-	await new Promise((resolve) => setTimeout(() => resolve(), 10000));
+	//await new Promise((resolve) => setTimeout(() => resolve(), 10000));
+	await new Promise((resolve) => setTimeout(() => resolve(), 500));
 
 	// Measure wavelength with reduced averaging
 	let wl_measurements = await measure_reduced_wavelength(desired_nir_wl);
@@ -579,8 +589,9 @@ async function scanning_mode() {
 	let starting_energy = 3750;
 	let ending_energy = 3780;*/
 	// fIR
-    let starting_energy = 1845;
-    let ending_energy = 1875;
+	let starting_energy = 1845;
+	let ending_energy = 1850;
+	//let ending_energy = 1875;
 	/*// mIR 2
     let starting_energy = 3925;
     let ending_energy = 3955; */
@@ -632,4 +643,26 @@ async function request_wake_lock() {
 	} catch (err) {
 		console.log(`Screen lock error: ${err.name}, ${err.message}`);
 	}
+}
+
+/* Functions for simulating wavemeter on Mac */
+
+// Return a wavelength based on OPO's defined wavelength
+function mac_wavelength() {
+	// Get the OPO's wavelength
+	let wl = opo.status.current_wavelength;
+	// Add a bias
+	//wl -= 0.256;
+	// Add some noise
+	wl += 0.01 * (2 * Math.random() - 1);
+	// Small chance of wavelength being very far off
+	if (Math.random() < 0.1) {
+		wl -= 20;
+	}
+	return wl;
+}
+
+// Initialize JS function on C++ side
+function initialize_mac_fn() {
+	wavemeter.setUpFunction(mac_wavelength);
 }
