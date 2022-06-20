@@ -58,8 +58,8 @@ const opo = {
 	params: {
 		lower_wl_bound: 710,
 		upper_wl_bound: 880,
-		//expected_shift: 0.257, // nm
-		expected_shift: 0, // nm
+		expected_shift: 0.257, // nm
+		//expected_shift: 0, // nm
 	},
 	/**
 	 * Get the nIR wavelength recorded by the OPO
@@ -598,29 +598,33 @@ async function scanning_mode() {
 	/*// mIR 2
     let starting_energy = 3925;
     let ending_energy = 3955; */
-	/*// fIR 2
-    let starting_energy = 1500;
-    let ending_energy = 1530;*/
+	// fIR 2
+	let starting_energy = 1500;
+	let ending_energy = 1530;
 	/*// mIR 3
 	let starting_energy = 3770;
 	let ending_energy = 3800;*/
-	// mIR 4
+	/*// mIR 4
 	let starting_energy = 3660;
-	let ending_energy = 3690;
+	let ending_energy = 3690;*/
 	let energy_step = 1.5;
 	const energies = [];
+	const energy_diffs = [];
 	const measurement_results = [];
 	const wl_shifts = [];
 	let measured;
 	for (let energy = starting_energy; energy <= ending_energy; energy += energy_step) {
 		measured = await move_to_ir(energy);
 		energies.push(measured.final.energy);
+		energy_diffs.push(measured.final.energy_difference);
 		measurement_results.push(measured);
 		wl_shifts.push(measured.final.wl_difference);
 		// Wait 10s as a stand-in for data collection
-		await new Promise((resolve) => setTimeout(() => resolve(), 10000));
+		//await new Promise((resolve) => setTimeout(() => resolve(), 10000));
+		await new Promise((resolve) => setTimeout(() => resolve(), 1000));
 	}
 	console.log("Done!", energies);
+	console.log(energy_diffs);
 	console.log("Average wl shift:", average(wl_shifts));
 	console.timeEnd("Scanning");
 	console.log(`Subtract ${10 * energies.length}s off time`);
@@ -658,9 +662,9 @@ function mac_wavelength() {
 	// Get the OPO's wavelength
 	let wl = opo.status.current_wavelength;
 	// Add a bias
-	//wl -= 0.256;
+	wl -= 0.2565;
 	// Add some noise
-	wl += 0.01 * (2 * Math.random() - 1);
+	wl += norm_rand(0, 0.01);
 	// Small chance of wavelength being very far off
 	if (Math.random() < 0.1) {
 		wl -= 20;
@@ -671,4 +675,18 @@ function mac_wavelength() {
 // Initialize JS function on C++ side
 function initialize_mac_fn() {
 	wavemeter.setUpFunction(mac_wavelength);
+}
+
+/**
+ * Random number with normal distribution
+ * @param {Number} mu - center of normal distribution (mean)
+ * @param {Number} sigma - width of normal distribution (sqrt(variance))
+ * @returns {Number} random number
+ */
+function norm_rand(mu, sigma) {
+	let u = 0,
+		v = 0;
+	while (u === 0) u = Math.random(); //Converting [0,1) to (0,1)
+	while (v === 0) v = Math.random();
+	return sigma * Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v) + mu;
 }

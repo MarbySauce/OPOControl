@@ -21,7 +21,7 @@ const server = net.createServer(function (connection) {
 
 	connection.on("end", function () {
 		console.log("client disconnected");
-		close_server();
+		//close_server();
 	});
 
 	connection.on("data", (data) => {
@@ -44,6 +44,7 @@ function parse_data(data) {
 	let passed_data = data.split(" ");
 	// Used commands are SETSPD, TELLWL, TELLSTAT, and GOTO
 	//		No argument should take more than 1 argument
+	// Also added in command CLOSE which closes the server
 	if (passed_data.length > 2) {
 		send_error(1);
 	}
@@ -61,6 +62,9 @@ function parse_data(data) {
 			break;
 		case "TELLSTAT":
 			tell_stat();
+			break;
+		case "CLOSE":
+			close_server();
 			break;
 		default:
 			send_error(1);

@@ -4,10 +4,14 @@
 
 #include <string>
 #include <napi.h>
+#include <iostream>
 
 
 // Global variables
 Napi::FunctionReference macWavelengthFn;
+
+
+using namespace std;
 
 
 // Get wavelength
