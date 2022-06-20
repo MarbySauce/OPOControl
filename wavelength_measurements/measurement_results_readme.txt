@@ -68,3 +68,14 @@ measure_reduced_wavelength() now removes values > +- 1nm away from the desired n
 	the average wavelength. Also removed opo shift from 2nd iteration (so its not double counted)
 fir_4: (1845 - 1875 cm-1)
 fir_5: (  "  "   "   "  ) Going back to 50 wl measurements (from 200)
+
+
+
+6/20/22
+Changed IR speed to 0.033 nm/sec, took out delays, and took out initial +1nm step 
+OPO shift seems to be 0.03 nm now 
+mir_8: (3925 - 3955 cm-1)
+For first iteration, move by half wl_difference
+mir_9: (  "  "   "   "  )
+Changed OPO motors to be 2 counts/sec (like OPA)
+mir_10: (  "  "   "   "  )

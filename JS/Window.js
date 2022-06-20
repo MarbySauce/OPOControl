@@ -32,7 +32,7 @@ const opo = {
 			get_wl: "TELLWL",
 			get_motor_status: "TELLSTAT",
 			move_fast: "SETSPD 3.0", // Move 3 nm/sec
-			move_slow: "SETSPD 0.66", // Move 0.66 nm/sec
+			move_slow: "SETSPD 0.033", //"SETSPD 0.66", // Move 0.66 nm/sec
 			move: (val) => {
 				return "GOTO " + val.toFixed(3);
 			},
@@ -51,7 +51,7 @@ const opo = {
 	params: {
 		lower_wl_bound: 710,
 		upper_wl_bound: 880,
-		expected_shift: 0.257, // nm
+		expected_shift: 0, //0.257, // nm
 	},
 	/**
 	 * Get the nIR wavelength recorded by the OPO
@@ -371,7 +371,7 @@ async function move_to_ir(wavenumber, use_nm) {
 		// Not close enough, need to iterate
 		// Check that it's not trying to move too far (i.e. wavelength measurement isn't off)
 		if (Math.abs(measured.wl_difference) < 1.5) {
-			measured = await move_to_ir_once(nir_wl + measured.wl_difference, desired_mode, wavenumber);
+			measured = await move_to_ir_once(nir_wl + 0.5 * measured.wl_difference, desired_mode, wavenumber);
 			// (Update the nIR to account for offset, but still give original desired energy)
 		} else {
 			console.log(`Moving nIR by expected shift of ${opo.params.expected_shift} nm`);
@@ -401,7 +401,7 @@ async function move_to_ir(wavenumber, use_nm) {
 // Single iteration of moving OPO wavelength and measuring actual wavelength
 async function move_to_ir_once(desired_nir_wl, desired_mode, desired_wavenumber) {
 	// First move to nIR 1 nm away from desired (OPO doesn't like small movements)
-	let cmd_success = opo.goto_nir(desired_nir_wl + 1);
+	/*let cmd_success = opo.goto_nir(desired_nir_wl + 1);
 	// Make sure command was successful
 	if (!cmd_success) {
 		console.log(`Could not move to wavelength 1 nm away from IR energy of ${desired_wavenumber} cm-1`);
@@ -412,7 +412,7 @@ async function move_to_ir_once(desired_nir_wl, desired_mode, desired_wavenumber)
 	let motor_movement = await wait_for_motors();
 
 	// After motors stopped moving, wait 5s to give motors a break
-	await new Promise((resolve) => setTimeout(() => resolve(), 5000));
+	await new Promise((resolve) => setTimeout(() => resolve(), 5000));*/
 
 	/* Now move to desired wavelength */
 
@@ -431,7 +431,7 @@ async function move_to_ir_once(desired_nir_wl, desired_mode, desired_wavenumber)
 	opo.get_wavelength();
 
 	// After motors stopped moving, wait 10s for wavelength to settle
-	await new Promise((resolve) => setTimeout(() => resolve(), 10000));
+	//await new Promise((resolve) => setTimeout(() => resolve(), 10000));
 
 	// Measure wavelength with reduced averaging
 	let wl_measurements = await measure_reduced_wavelength(desired_nir_wl);
@@ -584,18 +584,18 @@ async function scanning_mode() {
 	/*// fIR
     let starting_energy = 1845;
     let ending_energy = 1875;*/
-	/*// mIR 2
+	// mIR 2
     let starting_energy = 3925;
-    let ending_energy = 3955; */
+    let ending_energy = 3955; 
 	/*// fIR 2
     let starting_energy = 1500;
     let ending_energy = 1530;*/
 	/*// mIR 3
 	let starting_energy = 3770;
 	let ending_energy = 3800;*/
-	// mIR 4
+	/*// mIR 4
 	let starting_energy = 3660;
-	let ending_energy = 3690;
+	let ending_energy = 3690;*/
 	let energy_step = 1.5;
 	const energies = [];
 	const measurement_results = [];
