@@ -16,6 +16,12 @@ function startup() {
 	opo.network.connect();
 	// Set OPO speed as slow
 	opo.move_slow();
+	// Set up Mac wavemeter simulation function
+	initialize_mac_fn();
+	// Get OPO wavelength
+	setTimeout(() => {
+		opo.get_wavelength();
+	}, 1000);
 }
 
 /* Functions for OPO */
@@ -25,7 +31,8 @@ const opo = {
 	network: {
 		client: new net.Socket(),
 		config: {
-			host: "169.254.170.155",
+			host: "localhost",
+			//host: "169.254.170.155",
 			port: 1315,
 		},
 		command: {
@@ -110,7 +117,7 @@ function opo_goto_nir(nir_wavelength) {
 	/*if (Math.abs(nir_wavelength - opo.status.current_wavelength) < 0.005) {
 		console.log("Wavelength too close to current wavelength");
 		return false;
-	}*/ 
+	}*/
 	opo.status.motors_moving = true;
 	opo.network.client.write(opo.network.command.move(nir_wavelength), () => {});
 	return true;
@@ -598,18 +605,22 @@ async function scanning_mode() {
 	let ending_energy = 3690;*/
 	let energy_step = 1.5;
 	const energies = [];
+	const energy_diffs = [];
 	const measurement_results = [];
 	const wl_shifts = [];
 	let measured;
 	for (let energy = starting_energy; energy <= ending_energy; energy += energy_step) {
 		measured = await move_to_ir(energy);
 		energies.push(measured.final.energy);
+		energy_diffs.push(measured.final.energy_difference);
 		measurement_results.push(measured);
 		wl_shifts.push(measured.final.wl_difference);
 		// Wait 10s as a stand-in for data collection
-		await new Promise((resolve) => setTimeout(() => resolve(), 10000));
+		//await new Promise((resolve) => setTimeout(() => resolve(), 10000));
+		await new Promise((resolve) => setTimeout(() => resolve(), 1000));
 	}
 	console.log("Done!", energies);
+	console.log(energy_diffs);
 	console.log("Average wl shift:", average(wl_shifts));
 	console.timeEnd("Scanning");
 	console.log(`Subtract ${10 * energies.length}s off time`);
@@ -638,4 +649,40 @@ async function request_wake_lock() {
 	} catch (err) {
 		console.log(`Screen lock error: ${err.name}, ${err.message}`);
 	}
+}
+
+/* Functions for simulating wavemeter on Mac */
+
+// Return a wavelength based on OPO's defined wavelength
+function mac_wavelength() {
+	// Get the OPO's wavelength
+	let wl = opo.status.current_wavelength;
+	// Add a bias
+	wl -= 0.2565;
+	// Add some noise
+	wl += norm_rand(0, 0.01);
+	// Small chance of wavelength being very far off
+	if (Math.random() < 0.1) {
+		wl -= 20;
+	}
+	return wl;
+}
+
+// Initialize JS function on C++ side
+function initialize_mac_fn() {
+	wavemeter.setUpFunction(mac_wavelength);
+}
+
+/**
+ * Random number with normal distribution
+ * @param {Number} mu - center of normal distribution (mean)
+ * @param {Number} sigma - width of normal distribution (sqrt(variance))
+ * @returns {Number} random number
+ */
+function norm_rand(mu, sigma) {
+	let u = 0,
+		v = 0;
+	while (u === 0) u = Math.random(); //Converting [0,1) to (0,1)
+	while (v === 0) v = Math.random();
+	return sigma * Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v) + mu;
 }

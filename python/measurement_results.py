@@ -8,8 +8,8 @@ from math import sqrt
 
 # Variables to edit
 
-file_name = "fir_3"			# Name of .json file to look at
-desired_energy = 3777		# Specific energy measurement to analyze
+file_name = "mir_2"			# Name of .json file to look at
+desired_energy = 377		# Specific energy measurement to analyze
 
 base_file = "./wavelength_measurements/measurement_results_"
 full_file_name = base_file + file_name + ".json"
@@ -85,8 +85,8 @@ def plot_wavelengths(results: list):
 	if "final" in results[0]:
 		# Version from 6/15/22
 		expected = [result["final"]["desired_energy"] for result in results]
-		#measured = [result["final"]["energy"] for result in results]
-		measured = [result["first"]["energy"] for result in results]
+		measured = [result["final"]["energy"] for result in results]
+		first_measured = [result["first"]["energy"] for result in results]
 	else:
 		# Version from 6/14/22
 		expected = [result["desired_energy"] for result in results]
@@ -96,6 +96,7 @@ def plot_wavelengths(results: list):
 	# Plot expected and measured values as scatter plot
 	color = "C1"
 	ax1.scatter(increments, expected, label = "expected")
+	#ax1.scatter(increments, first_measured, color = "green", label = "first measured")
 	ax1.scatter(increments, measured, color = color, label = "measured")
 	ax1.set_ylabel("Energy ($cm^{-1}$)")
 	ax1.tick_params("y", labelcolor = color)
