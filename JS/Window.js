@@ -39,7 +39,8 @@ const opo = {
 			get_wl: "TELLWL",
 			get_motor_status: "TELLSTAT",
 			move_fast: "SETSPD 1", //"SETSPD 3.0", // Move 3 nm/sec
-			move_slow: "SETSPD 0.001", //"SETSPD 0.033", //"SETSPD 0.66", // Move 0.66 nm/sec
+			move_slow: "SETSPD 0.01", //"SETSPD 0.033", //"SETSPD 0.66", // Move 0.66 nm/sec
+			move_very_slow: "SETSPD 0.001",
 			move: (val) => {
 				return "GOTO " + val.toFixed(3);
 			},
@@ -97,6 +98,9 @@ const opo = {
 	 */
 	move_slow: () => {
 		opo.network.client.write(opo.network.command.move_slow, () => {});
+	},
+	move_very_slow: () => {
+		opo.network.client.write(opo.network.command.move_very_slow, () => {});
 	},
 	/**
 	 * Parse error returned by OPO
@@ -377,13 +381,15 @@ async function move_to_ir(wavenumber, use_nm) {
 	if (Math.abs(measured.energy_difference) > 0.3) {
 		// Not close enough, need to iterate
 		// Check that it's not trying to move too far (i.e. wavelength measurement isn't off)
+		opo.move_very_slow();
 		if (Math.abs(measured.wl_difference) < 1.5) {
-			measured = await move_to_ir_once(nir_wl + measured.wl_difference, desired_mode, wavenumber);
+			measured = await move_to_ir_once(nir_wl + 0.5 * measured.wl_difference, desired_mode, wavenumber);
 			// (Update the nIR to account for offset, but still give original desired energy)
 		} else {
 			console.log(`Moving nIR by expected shift of ${opo.params.expected_shift} nm`);
 			measured = await move_to_ir_once(nir_wl + opo.params.expected_shift, desired_mode, wavenumber);
 		}
+		opo.move_slow();
 		iterations++;
 
 		opo_movements.second = measured;

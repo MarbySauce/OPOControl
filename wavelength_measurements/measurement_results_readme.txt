@@ -88,3 +88,6 @@ Eric from Roland's group told me their OPO moves at 0.001 nm/sec. Changed scanni
 Took out the iteration, so it only moves once per increment 
 mir_11: (3925 - 3955 cm-1)
 Added the iteration back 
+mir_12: (  "  "   "   "  )
+Made the iteration move by half the difference
+mir_13: (  "  "   "   "  )
