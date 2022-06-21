@@ -8,11 +8,13 @@ from math import sqrt
 
 # Variables to edit
 
-file_name = "mir_2"			# Name of .json file to look at
-desired_energy = 377		# Specific energy measurement to analyze
+file_name = "mir_10"			# Name of .json file to look at
+desired_energy = 377			# Specific energy measurement to analyze
 
 base_file = "./wavelength_measurements/measurement_results_"
 full_file_name = base_file + file_name + ".json"
+
+error_threshold = 1 		# If max error is above this, calculate reduced errors
 
 run_test = False 			# Whether to run the test() function (True) or main() function (False)
 
@@ -26,7 +28,7 @@ def main():
 	Avg, Max, Min = get_errors(results)
 	print(f"Average error: {Avg:.3f} cm-1, max error: {Max:.3f} cm-1, min error: {Min:.3f} cm-1")
 	# If max error is large, get error results excluding outliers
-	if Max > 5:
+	if Max > error_threshold:
 		Avg, Max, Min = get_reduced_errors(results)
 		print(f"Reduced - average error: {Avg:.3f} cm-1, max error: {Max:.3f} cm-1, min error: {Min:.3f} cm-1")
 
@@ -53,20 +55,19 @@ def test():
 	print(f"Looking at {file_name}")
 	results = parse_json(full_file_name)
 
-	# Looking at bad measurement
-	result = results[18]
-	initial_values = result["final"]["wl_measurements"]["initial"]["values"]
-	final_values = result["final"]["wl_measurements"]["final"]["values"]
-	# Get average and stdev of initial measurement
-	avg, stdev = get_average(initial_values)
-	print(f"Initial avg: {avg:.3f}, stdev: {stdev:.5f}")
+	opo_shift_initial = []
+	opo_shift_final = []
 
-	expected_wl = result["first"]["desired_wl"]
-	reduced_values = [val for val in initial_values if (abs(val - expected_wl) < 1)]
+	for result in results:
+		if "second" in result:
+			opo_shift = result["second"]["wavelength"] - result["second"]["opo_wl"]
+			opo_shift_final.append(opo_shift)
+		opo_shift = result["first"]["wavelength"] - result["first"]["opo_wl"]
+		opo_shift_initial.append(opo_shift)
 	
-	# Get average and stdev of reduced values
-	avg, stdev = get_average(reduced_values)
-	print(f"Reduced avg: {avg:.3f}, stdev: {stdev:.5f}")
+	print(get_average(opo_shift_initial))
+	print(get_average(opo_shift_final))
+
 
 
 
@@ -118,8 +119,8 @@ def get_errors(results: list):
 	if "final" in results[0]:
 		# Version from 6/15/22
 		expected = [result["final"]["desired_energy"] for result in results]
-		#measured = [result["final"]["energy"] for result in results]
-		measured = [result["first"]["energy"] for result in results]
+		measured = [result["final"]["energy"] for result in results]
+		#measured = [result["first"]["energy"] for result in results]
 	else:
 		# Version from 6/14/22
 		expected = [result["desired_energy"] for result in results]
@@ -142,7 +143,7 @@ def get_reduced_errors(results: list):
 		measured = [result["energy"] for result in results]
 	# Calculate absolute difference
 	difference = [abs(expect - measure) for expect, measure in zip(expected, measured)]
-	reduced_difference = [diff for diff in difference if diff < 5]
+	reduced_difference = [diff for diff in difference if diff < error_threshold]
 	average = sum(reduced_difference) / len(reduced_difference)
 	return average, max(reduced_difference), min(reduced_difference)
 
