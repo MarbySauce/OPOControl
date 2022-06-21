@@ -15,7 +15,7 @@ function startup() {
 	// Connect to OPO
 	opo.network.connect();
 	// Set OPO speed as slow
-	opo.move_slow();
+	//opo.move_slow();
 	// Set up Mac wavemeter simulation function
 	initialize_mac_fn();
 	// Get OPO wavelength
@@ -38,8 +38,8 @@ const opo = {
 		command: {
 			get_wl: "TELLWL",
 			get_motor_status: "TELLSTAT",
-			move_fast: "SETSPD 3.0", // Move 3 nm/sec
-			move_slow: "SETSPD 0.033", //"SETSPD 0.66", // Move 0.66 nm/sec
+			move_fast: "SETSPD 1", //"SETSPD 3.0", // Move 3 nm/sec
+			move_slow: "SETSPD 0.001", //"SETSPD 0.033", //"SETSPD 0.66", // Move 0.66 nm/sec
 			move: (val) => {
 				return "GOTO " + val.toFixed(3);
 			},
@@ -374,7 +374,7 @@ async function move_to_ir(wavenumber, use_nm) {
 
 	opo_movements.first = measured;
 
-	if (Math.abs(measured.energy_difference) > 0.3) {
+	/*if (Math.abs(measured.energy_difference) > 0.3) {
 		// Not close enough, need to iterate
 		// Check that it's not trying to move too far (i.e. wavelength measurement isn't off)
 		if (Math.abs(measured.wl_difference) < 1.5) {
@@ -387,7 +387,7 @@ async function move_to_ir(wavenumber, use_nm) {
 		iterations++;
 
 		opo_movements.second = measured;
-	}
+	}*/
 
 	opo_movements.final = measured;
 
@@ -592,8 +592,8 @@ async function scanning_mode() {
     let starting_energy = 1845;
     let ending_energy = 1875;*/
 	// mIR 2
-    let starting_energy = 3925;
-    let ending_energy = 3955; 
+	let starting_energy = 3925;
+	let ending_energy = 3955;
 	/*// fIR 2
     let starting_energy = 1500;
     let ending_energy = 1530;*/
@@ -609,6 +609,11 @@ async function scanning_mode() {
 	const measurement_results = [];
 	const wl_shifts = [];
 	let measured;
+	// First move to the starting energy at a higher speed
+	opo.move_fast();
+	await move_to_ir(starting_energy);
+	// Use slower speed for small increments
+	opo.move_slow();
 	for (let energy = starting_energy; energy <= ending_energy; energy += energy_step) {
 		measured = await move_to_ir(energy);
 		energies.push(measured.final.energy);
