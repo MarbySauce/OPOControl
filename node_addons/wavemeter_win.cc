@@ -30,10 +30,16 @@ Napi::Number NapiGetWavelength(const Napi::CallbackInfo& info) {
     return Napi::Number::New(env, lambda);
 }
 
+// Set up Mac simulation wavelength function
+void NapiSetUpFunction(const Napi::CallbackInfo& info) {
+	return;
+}
+
 // Set up module to export functions to JavaScript
 Napi::Object Init(Napi::Env env, Napi::Object exports) {
 	// Fill exports object with addon functions
 	exports["getWavelength"] = Napi::Function::New(env, NapiGetWavelength);
+    exports["setUpFunction"] = Napi::Function::New(env, NapiSetUpFunction);
 
     return exports;
 }

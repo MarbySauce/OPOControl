@@ -79,3 +79,12 @@ For first iteration, move by half wl_difference
 mir_9: (  "  "   "   "  )
 Changed OPO motors to be 2 counts/sec (like OPA)
 mir_10: (  "  "   "   "  )
+
+
+
+6/21/22
+Eric from Roland's group told me their OPO moves at 0.001 nm/sec. Changed scanning_mode() so that it
+	moves to the initial wavelength at 1 nm/sec, then starts loop moving at 0.001 nm/sec 
+Took out the iteration, so it only moves once per increment 
+mir_11: (3925 - 3955 cm-1)
+Added the iteration back 

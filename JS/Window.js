@@ -31,8 +31,8 @@ const opo = {
 	network: {
 		client: new net.Socket(),
 		config: {
-			host: "localhost",
-			//host: "169.254.170.155",
+			//host: "localhost",
+			host: "169.254.170.155",
 			port: 1315,
 		},
 		command: {
@@ -374,11 +374,11 @@ async function move_to_ir(wavenumber, use_nm) {
 
 	opo_movements.first = measured;
 
-	/*if (Math.abs(measured.energy_difference) > 0.3) {
+	if (Math.abs(measured.energy_difference) > 0.3) {
 		// Not close enough, need to iterate
 		// Check that it's not trying to move too far (i.e. wavelength measurement isn't off)
 		if (Math.abs(measured.wl_difference) < 1.5) {
-			measured = await move_to_ir_once(nir_wl + 0.5 * measured.wl_difference, desired_mode, wavenumber);
+			measured = await move_to_ir_once(nir_wl + measured.wl_difference, desired_mode, wavenumber);
 			// (Update the nIR to account for offset, but still give original desired energy)
 		} else {
 			console.log(`Moving nIR by expected shift of ${opo.params.expected_shift} nm`);
@@ -387,7 +387,7 @@ async function move_to_ir(wavenumber, use_nm) {
 		iterations++;
 
 		opo_movements.second = measured;
-	}*/
+	}
 
 	opo_movements.final = measured;
 
@@ -621,8 +621,8 @@ async function scanning_mode() {
 		measurement_results.push(measured);
 		wl_shifts.push(measured.final.wl_difference);
 		// Wait 10s as a stand-in for data collection
-		//await new Promise((resolve) => setTimeout(() => resolve(), 10000));
-		await new Promise((resolve) => setTimeout(() => resolve(), 1000));
+		await new Promise((resolve) => setTimeout(() => resolve(), 10000));
+		//await new Promise((resolve) => setTimeout(() => resolve(), 1000));
 	}
 	console.log("Done!", energies);
 	console.log(energy_diffs);
