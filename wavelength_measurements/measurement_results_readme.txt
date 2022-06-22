@@ -91,3 +91,7 @@ Added the iteration back
 mir_12: (  "  "   "   "  )
 Made the iteration move by half the difference
 mir_13: (  "  "   "   "  )
+For the first IR mvmt, speed = 0.01 nm/sec, and if a second is needed, speed = 0.001 nm/sec 
+mir_14: (  "  "   "   "  )
+For the iteration, it moves by +- 0.01 instead of calc'd shift 
+mir_15: (  "  "   "   "  )

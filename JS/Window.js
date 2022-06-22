@@ -383,7 +383,8 @@ async function move_to_ir(wavenumber, use_nm) {
 		// Check that it's not trying to move too far (i.e. wavelength measurement isn't off)
 		opo.move_very_slow();
 		if (Math.abs(measured.wl_difference) < 1.5) {
-			measured = await move_to_ir_once(nir_wl + 0.5 * measured.wl_difference, desired_mode, wavenumber);
+			//measured = await move_to_ir_once(nir_wl + 0.5 * measured.wl_difference, desired_mode, wavenumber);
+			measured = await move_to_ir_once(nir_wl + 0.01 * (2 * (measured.wl_difference > 0) - 1), desired_mode, wavenumber);
 			// (Update the nIR to account for offset, but still give original desired energy)
 		} else {
 			console.log(`Moving nIR by expected shift of ${opo.params.expected_shift} nm`);
