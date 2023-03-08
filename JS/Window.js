@@ -5,6 +5,18 @@ const net = require("net");
 const fs = require("fs");
 // Wavemeter is controlled through C++, which requires node addons
 const wavemeter = require("bindings")("wavemeter");
+const { performance } = require("perf_hooks");
+const EventEmitter = require("events").EventEmitter;
+
+const wmEmitter = new EventEmitter();
+
+const wmMessages = {
+	Alert: {
+		Motors_Stopped: "wm_Alert_Motors_Stopped",
+		Current_Wavelength: "wm_Alert_Current_Wavelength"
+	}
+}
+
 
 window.onload = function () {
 	startup();
@@ -14,8 +26,6 @@ function startup() {
 	laser.excitation.mode = "mir";
 	// Connect to OPO
 	opo.network.connect();
-	// Set OPO speed as slow
-	//opo.move_slow();
 	// Set up Mac wavemeter simulation function
 	initialize_mac_fn();
 	// Get OPO wavelength
@@ -26,7 +36,6 @@ function startup() {
 
 /* Functions for OPO */
 
-// Is this object gonna confuse with the laser module?
 const opo = {
 	network: {
 		client: new net.Socket(),
@@ -38,21 +47,30 @@ const opo = {
 		command: {
 			get_wl: "TELLWL",
 			get_motor_status: "TELLSTAT",
-			move_fast: "SETSPD 1", //"SETSPD 3.0", // Move 3 nm/sec
-			move_slow: "SETSPD 0.01", //"SETSPD 0.033", //"SETSPD 0.66", // Move 0.66 nm/sec
-			move_very_slow: "SETSPD 0.001",
 			move: (val) => {
 				return "GOTO " + val.toFixed(3);
 			},
 		},
 		connect: () => {
-			opo.network.client.connect(opo.network.config, () => {});
+			if (opo.status.connected) {
+				// Already connected
+				return;
+			}
+			opo.network.client.connect(opo.network.config, (error) => {
+				if (error) {
+					console.log(`Could not connect to OPO: ${error}`);
+				} else {
+					opo.status.connected = true;
+				}
+			});
 		},
 		close: () => {
 			opo.network.client.end();
+			opo.status.connected = false;
 		},
 	},
 	status: {
+		connected: false,
 		motors_moving: false,
 		current_wavelength: 0,
 	},
@@ -73,10 +91,6 @@ const opo = {
 	 */
 	update_wavelength: (wavelength) => opo_update_wavelength(wavelength),
 	/**
-	 * Ask OPO if the motors are still moving
-	 */
-	are_motors_moving: () => opo_are_motors_moving(),
-	/**
 	 * Get status of OPO motors
 	 */
 	get_motor_status: () => {
@@ -88,19 +102,13 @@ const opo = {
 	 */
 	goto_nir: (nir_wavelength) => opo_goto_nir(nir_wavelength),
 	/**
-	 * Set OPO motor speed as 3 nm/sec
+	 * Set OPO movement speed (in nm/sec)
+	 * @param {number} speed - OPO nIR movement speed (in nm/sec)
 	 */
-	move_fast: () => {
-		opo.network.client.write(opo.network.command.move_fast, () => {});
-	},
-	/**
-	 * Set OPO motor speed as 0.66 nm/sec
-	 */
-	move_slow: () => {
-		opo.network.client.write(opo.network.command.move_slow, () => {});
-	},
-	move_very_slow: () => {
-		opo.network.client.write(opo.network.command.move_very_slow, () => {});
+	set_speed: (speed) => {
+		let nIR_speed = speed || 1.0; // Default value of 1 nm/sec
+		console.log(`SETSPD ${nIR_speed.toFixed(3)}`);
+		opo.network.client.write(`SETSPD ${nIR_speed.toFixed(3)}`, () => {});
 	},
 	/**
 	 * Parse error returned by OPO
@@ -109,6 +117,7 @@ const opo = {
 	 */
 	parse_error: (error_code) => opo_parse_error(error_code),
 };
+
 
 // Tell OPO to move to nir wavelength
 function opo_goto_nir(nir_wavelength) {
@@ -123,6 +132,7 @@ function opo_goto_nir(nir_wavelength) {
 		return false;
 	}*/
 	opo.status.motors_moving = true;
+	console.log(opo.network.command.move(nir_wavelength));
 	opo.network.client.write(opo.network.command.move(nir_wavelength), () => {});
 	return true;
 }
@@ -130,6 +140,7 @@ function opo_goto_nir(nir_wavelength) {
 // Update nIR wavelength value given by OPO
 function opo_update_wavelength(wavelength) {
 	console.log("Wavelength:", wavelength);
+	wmEmitter.emit(wmMessages.Alert.Current_Wavelength, wavelength);
 	opo.status.current_wavelength = wavelength;
 }
 
@@ -157,6 +168,23 @@ function opo_parse_error(error_code) {
 opo.network.client.on("data", (data) => {
 	// Convert to string
 	data = data.toString();
+	// Split data up (in case two things came at the same time)
+	data = data.split("\r\n");
+	// Process message(s)
+	data.forEach((msg) => {
+		if (msg) {
+			process_opo_data(msg);
+		}
+	});
+});
+
+// Receive error message (e.g. cannot connect to server)
+opo.network.client.on("error", (error) => {
+	console.log(`OPO Connection ${error}`);
+	opo.status.connected = false;
+});
+
+function process_opo_data(data) {
 	// Get rid of newline character "/r/n"
 	data = data.replace("\r\n", "");
 	// Filter motor movement results, which are hexadecimal numbers
@@ -164,11 +192,17 @@ opo.network.client.on("data", (data) => {
 		// Note: Don't use triple equals here
 		if (data == 0) {
 			// Motors are done moving
+			wmEmitter.emit(wmMessages.Alert.Motors_Stopped);
 			opo.status.motors_moving = false;
 			return;
 		}
 		// Motors are still moving
 		opo.status.motors_moving = true;
+		return;
+	}
+	// Make sure it is a number (not an unexpected result)
+	if (isNaN(data)) {
+		console.log("Message from OPO:", data);
 		return;
 	}
 	// Convert data to number
@@ -180,7 +214,7 @@ opo.network.client.on("data", (data) => {
 	}
 	// Only remaining option is it's the OPO's wavelength
 	opo.update_wavelength(data);
-});
+}
 
 /* Functions for Wavelength Conversion */
 
@@ -298,7 +332,7 @@ function get_nir_wavelength(wavenumber) {
 	} else {
 		// Photon energy out of range
 		console.log(`Energy of ${wavenumber} cm^-1 Out of Range`);
-		return [];
+		return [undefined, undefined];
 	}
 	return [desired_mode, nir_wl];
 }
@@ -381,7 +415,7 @@ async function move_to_ir(wavenumber, use_nm) {
 	if (Math.abs(measured.energy_difference) > 0.3) {
 		// Not close enough, need to iterate
 		// Check that it's not trying to move too far (i.e. wavelength measurement isn't off)
-		opo.move_very_slow();
+		opo.set_speed(0.01);
 		if (Math.abs(measured.wl_difference) < 1.5) {
 			//measured = await move_to_ir_once(nir_wl + 0.5 * measured.wl_difference, desired_mode, wavenumber);
 			measured = await move_to_ir_once(nir_wl + 0.01 * (2 * (measured.wl_difference > 0) - 1), desired_mode, wavenumber);
@@ -390,7 +424,7 @@ async function move_to_ir(wavenumber, use_nm) {
 			console.log(`Moving nIR by expected shift of ${opo.params.expected_shift} nm`);
 			measured = await move_to_ir_once(nir_wl + opo.params.expected_shift, desired_mode, wavenumber);
 		}
-		opo.move_slow();
+		opo.set_speed(0.1);
 		iterations++;
 
 		opo_movements.second = measured;
@@ -477,6 +511,7 @@ async function move_to_ir_once(desired_nir_wl, desired_mode, desired_wavenumber)
 // Check if motors are moving every 500ms until they are stopped asynchronously
 async function wait_for_motors() {
 	while (opo.status.motors_moving) {
+		// Check every 500ms if motors are still moving
 		await new Promise((resolve) =>
 			setTimeout(() => {
 				opo.get_motor_status();
@@ -487,8 +522,12 @@ async function wait_for_motors() {
 	return true;
 }
 
-// Measure wavelengths and find reduced average (asynchronous)
-async function measure_reduced_wavelength(expected_wl) {
+/**
+ * (Async function) Measure wavelengths and find reduced average
+ * @param {number} expected_wl - wavelength to expect during measurements (nm)
+ * @returns {number} wavelength, returns 0 if unable to measure
+ */
+async function measure_wavelength(expected_wl) {
 	const measured_values = [];
 	let measured_value_length = 50; // Number of wavelengths to measure
 	let minimum_stdev = 0.01; // Reduce wavelength array until stdev is below this value
@@ -496,15 +535,31 @@ async function measure_reduced_wavelength(expected_wl) {
 	let too_far_val = 1; // nm, wavelength values too_far_val nm away from expected will be removed (if expected_wl given)
 	let max_iteration_count = 10; // Maximum number of iterations in reduction
 	let fail_count = 0; // Keep track of how many failed measurements there were
+	let bad_measurements = 0;
 	let wl;
+
+	// Start wavemeter measurement
+	wavemeter.startMeasurement();
+
 	while (measured_values.length < measured_value_length) {
+		// Get measurement wavelength every IR pulse (100ms / 10Hz)
 		await new Promise((resolve) =>
 			setTimeout(() => {
 				wl = wavemeter.getWavelength();
+				// Make sure there actually was a measurement to get
 				if (wl > 0) {
 					// Make sure we didn't get the same measurement twice by comparing against last measurement
-					if (wl !== measured_values.at(-1)) {
-						if (Math.abs(wl - expected_wl) < too_far_val) {
+					if (wl !== measured_values[measured_values.length-1]) {
+						// If an expected wavelength was given, make sure measured value isn't too far away
+						if (expected_wl) {
+							if (Math.abs(wl - expected_wl) < too_far_val) {
+								measured_values.push(wl);
+							} else {
+								// This was a bad measurement
+								bad_measurements++;
+							}
+						} else {
+							// No expected wavelength given, record all values
 							measured_values.push(wl);
 						}
 					}
@@ -517,12 +572,24 @@ async function measure_reduced_wavelength(expected_wl) {
 		);
 		// Check if there were too many failures
 		if (fail_count > 0.2 * measured_value_length) {
+			// Stop wavemeter measurement
+			wavemeter.stopMeasurement();
 			console.log(`Wavelength measurement: ${fail_count} failed measurements - Canceled`);
-			return false;
+			return 0;
+		}
+		// Check if there were too many bad measurements
+		if (bad_measurements >= 10 * measured_value_length) {
+			// Stop wavemeter measurement
+			wavemeter.stopMeasurement();
+			console.log(`Wavelength measurement: ${bad_measurements} bad measurements - Canceled`);
+			return 0;
 		}
 	}
+	// Stop wavemeter measurement
+	wavemeter.stopMeasurement();
 	// Now we have enough measurements - get rid of outliers until standard deviation is low enough
-	return get_reduced_average(measured_values, minimum_stdev, minimum_length, max_iteration_count, expected_wl, too_far_val);
+	let reduced_avg_results = get_reduced_average(measured_values, minimum_stdev, minimum_length, max_iteration_count);
+	return reduced_avg_results.final.average; // Return the average wavelength
 }
 
 // Calculate average and filter outliers until standard deviation is small enough
@@ -697,4 +764,190 @@ function norm_rand(mu, sigma) {
 	while (u === 0) u = Math.random(); //Converting [0,1) to (0,1)
 	while (v === 0) v = Math.random();
 	return sigma * Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v) + mu;
+}
+
+async function sleep(delay_ms) {
+	return new Promise((resolve) => setTimeout(resolve, delay_ms));
+}
+
+function time_convert(time) {
+	let hours = Math.floor(time / (60 * 60 * 1000));
+	let hours_remainder = time % (60 * 60 * 1000);
+	let minutes = Math.floor(hours_remainder / (60 * 1000));
+	let minutes_remainder = hours_remainder % (60 * 1000);
+	let seconds = Math.floor(minutes_remainder / 1000);
+	let ms = minutes_remainder % 1000;
+	return [ms, seconds, minutes, hours];
+}
+
+
+//////////////////////////////////////////////////////////////////
+
+class Timer {
+	constructor(name) {
+		this.name = name || "Undefined"
+		this.start_time = performance.now();
+		this.end_time = 0;
+		this.duration = 0;
+	}
+
+	start() {
+		this.start_time = performance.now();
+	}
+	end() {
+		this.end_time = performance.now();
+		this.duration = this.end_time - this.start_time;
+		return this.duration;
+	}
+	stop() {
+		return this.end();
+	}
+	end_print() {
+		this.end();
+		console.log(`${this.name} timer: `, time_convert(this.duration));
+	}
+}
+
+async function set_ir_energy(energy) {
+	let overall_timer = new Timer("Overall");
+	let measurement_timer = new Timer("Measurement");
+	// First, get the current wavelength stored in OPO
+	let opo_starting_wavelength = await new Promise((resolve) => {
+		wmEmitter.once(wmMessages.Alert.Current_Wavelength, (value) => {
+			resolve(value);
+		});
+		opo.get_wavelength();
+	});
+	// Get the desired nIR wavelength
+	let [desired_mode, desired_nir] = get_nir_wavelength(energy);
+	measurement_timer.start();
+	let current_wl = await measure_wavelength(opo_starting_wavelength);
+	measurement_timer.end_print();
+	let wl_difference = current_wl - opo_starting_wavelength;
+	let wl_error = wl_difference;
+	let measured_energy;
+
+	// Tell OPO to go to desired wavelength
+	opo.set_speed(0.5);
+	let energy_error = 100;
+	let iterations = 0;
+	while (Math.abs(energy_error) >= 0.5) {
+		wl_error += await set_ir_energy_iteration(desired_nir, wl_error);
+		measured_energy = convert(wl_measurement)[desired_mode].wavenumber;
+		energy_error = measured_energy - energy;
+		console.log("Energy error:", energy_error);
+		iterations++;
+		console.log("Iterations so far", iterations);
+	}
+	console.log("Iterations", iterations);
+
+	
+	console.log("DONE!");
+	overall_timer.end_print();
+
+	opo.set_speed();
+
+	return energy_error;
+}
+
+async function set_ir_energy_iteration(desired_nir, nir_error) {
+	let measurement_timer = new Timer("Measurement");
+	let movement_timer = new Timer("Movement");
+	let wl_error = nir_error || 0;
+	opo.goto_nir(desired_nir - wl_error);
+	// Wait for motors
+	await wait_for_motors();
+	//console.log("Motors finished moving");
+	//movement_timer.end_print();
+	// Measure wavelength with reduced averaging
+	measurement_timer.start();
+	wl_measurement = await measure_wavelength(desired_nir - wl_error);
+	//measurement_timer.end_print();
+	//console.log(wl_measurement);
+	wl_error = wl_measurement - desired_nir;
+	//console.log("WL Error:", wl_error);
+	return wl_error;
+}
+
+async function set_ir_energy_one_iteration(energy) {
+	console.log(`Moving to energy ${energy}`);
+	let overall_timer = new Timer("Overall");
+	// First, get the current wavelength stored in OPO
+	let opo_starting_wavelength = await new Promise((resolve) => {
+		wmEmitter.once(wmMessages.Alert.Current_Wavelength, (value) => {
+			resolve(value);
+		});
+		opo.get_wavelength();
+	});
+	// Get the desired nIR wavelength
+	let [desired_mode, desired_nir] = get_nir_wavelength(energy);
+	let current_wl = await measure_wavelength(opo_starting_wavelength);
+	let wl_difference = current_wl - opo_starting_wavelength;
+
+	opo.set_speed(0.05);
+	await set_ir_energy_iteration(desired_nir, wl_difference);
+	let measured_energy = convert(wl_measurement)[desired_mode].wavenumber;
+	energy_error = measured_energy - energy;
+	console.log("Energy error:", energy_error);
+
+	overall_timer.end_print();
+
+	opo.set_speed();
+
+	return energy_error;
+}
+
+
+async function check_1iter_errors(energy_gap, energy_steps) {
+	let one_iter_timer = new Timer();
+	let overall_timer = new Timer("Overall");
+	let starting_energy = 3750;
+	let gap = energy_gap || 5;
+	let steps = energy_steps || 10;
+	let errors = [];
+	let errors2 = [];
+	let durations = [];
+	let err;
+	for (let i = 0; i < steps; i++) {
+		one_iter_timer.start();
+		err = await set_ir_energy_one_iteration(starting_energy + gap * i);
+		durations.push(one_iter_timer.stop());
+		errors.push(err);
+		errors2.push(Math.pow(err, 2));
+		// Sleep for 5s
+		await sleep(5000);
+	}
+	console.log("Fully DONE");
+	overall_timer.end_print();
+	console.log(average(errors));
+	console.log(average(errors2));
+	let [dur_avg, dur_var] = average(durations);
+	console.log(time_convert(dur_avg), time_convert(dur_var));
+	console.log("Max error",Math.sqrt(Math.max(...errors2)));
+	console.log("Max time", time_convert(Math.max(...durations)));
+}
+
+
+async function measure_ir_repeatedly(iterations) {
+	let errors = [];
+	let wls = [];
+	let num_iters = iterations || 10;
+	let wl_measurement, wl_error;
+	// First, get the current wavelength stored in OPO
+	let opo_starting_wavelength = await new Promise((resolve) => {
+		wmEmitter.once(wmMessages.Alert.Current_Wavelength, (value) => {
+			resolve(value);
+		});
+		opo.get_wavelength();
+	});
+	// Measure the wavelength multiple times
+	for (let i = 0; i < num_iters; i++) {
+		wl_measurement = await measure_wavelength(opo_starting_wavelength);
+		wl_error = wl_measurement - opo_starting_wavelength;
+		console.log(i, opo_starting_wavelength, wl_measurement, wl_error);
+		errors.push(wl_error);
+		wls.push(wl_measurement)
+	}
+	console.log("Average wl:", average(wls));
+	console.log("Average error:", average(errors));
 }
