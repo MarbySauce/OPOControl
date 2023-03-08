@@ -901,7 +901,7 @@ async function set_ir_energy_one_iteration(energy) {
 async function check_1iter_errors(energy_gap, energy_steps) {
 	let one_iter_timer = new Timer();
 	let overall_timer = new Timer("Overall");
-	let starting_energy = 3750;
+	let starting_energy = 1860;
 	let gap = energy_gap || 5;
 	let steps = energy_steps || 10;
 	let errors = [];
